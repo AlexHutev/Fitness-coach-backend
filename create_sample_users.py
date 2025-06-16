@@ -10,6 +10,10 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv(project_root / ".env")
+
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.user import User, UserRole, SpecializationType, ExperienceLevel

@@ -15,13 +15,16 @@ class ExerciseService:
         muscle_groups_json = json.dumps(exercise_data.muscle_groups) if exercise_data.muscle_groups else None
         equipment_json = json.dumps(exercise_data.equipment) if exercise_data.equipment else None
         
+        # Convert enum to string value for storage
+        difficulty_level_str = exercise_data.difficulty_level.value if exercise_data.difficulty_level else None
+        
         exercise = Exercise(
             name=exercise_data.name,
             description=exercise_data.description,
             instructions=exercise_data.instructions,
             muscle_groups=muscle_groups_json,
             equipment=equipment_json,
-            difficulty_level=exercise_data.difficulty_level,
+            difficulty_level=difficulty_level_str,
             image_url=exercise_data.image_url,
             video_url=exercise_data.video_url,
             created_by=created_by,
@@ -115,6 +118,9 @@ class ExerciseService:
             if field in ["muscle_groups", "equipment"] and value is not None:
                 # Convert lists to JSON strings for storage
                 value = json.dumps(value)
+            elif field == "difficulty_level" and value is not None:
+                # Convert enum to string value for storage
+                value = value.value if hasattr(value, 'value') else value
             
             setattr(exercise, field, value)
         

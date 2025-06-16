@@ -8,7 +8,7 @@ import os
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = None
+    database_url: str = ""
     db_host: str = "localhost"
     db_port: int = 3306
     db_user: str = "fitness_coach_user"
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     
     # CORS
-    allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    allowed_origins: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
     
     @property 
     def cors_origins(self) -> List[str]:
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     
     @property
     def database_url_computed(self) -> str:
-        # Check if DATABASE_URL is set directly
+        # Check if DATABASE_URL is set directly (priority)
         if self.database_url:
             return self.database_url
         

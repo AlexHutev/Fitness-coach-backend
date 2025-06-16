@@ -52,17 +52,7 @@ def seed_sample_exercises(db: Session):
             "difficulty_level": "beginner",
             "is_public": True,
             "created_by": creator_id
-        }
-    ]
-    
-    # Create exercise objects (first chunk)
-    for exercise_data in sample_exercises:
-        exercise = Exercise(**exercise_data)
-        db.add(exercise)
-    
-    db.commit()
-    print(f"Successfully seeded {len(sample_exercises)} sample exercises (chunk 1)!")
-
+        },
         # Pull exercises
         {
             "name": "Pull-ups",
@@ -94,7 +84,6 @@ def seed_sample_exercises(db: Session):
             "is_public": True,
             "created_by": creator_id
         },
-        
         # Leg exercises
         {
             "name": "Squats",
@@ -105,10 +94,7 @@ def seed_sample_exercises(db: Session):
             "difficulty_level": "beginner",
             "is_public": True,
             "created_by": creator_id
-        }
-
-    # Add more exercises to the sample_exercises list  
-    more_exercises = [
+        },
         {
             "name": "Deadlifts",
             "description": "Compound exercise for posterior chain",
@@ -129,6 +115,7 @@ def seed_sample_exercises(db: Session):
             "is_public": True,
             "created_by": creator_id
         },
+        # Core exercises
         {
             "name": "Plank",
             "description": "Isometric core strengthening exercise",
@@ -141,5 +128,10 @@ def seed_sample_exercises(db: Session):
         }
     ]
     
-    # Add more exercises to the list
-    sample_exercises.extend(more_exercises)
+    # Create exercise objects
+    for exercise_data in sample_exercises:
+        exercise = Exercise(**exercise_data)
+        db.add(exercise)
+    
+    db.commit()
+    print(f"Successfully seeded {len(sample_exercises)} sample exercises!")

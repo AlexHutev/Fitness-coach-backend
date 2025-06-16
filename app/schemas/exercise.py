@@ -1,6 +1,7 @@
 from typing import List, Optional
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, validator
 from datetime import datetime
+import json
 from app.models.program import DifficultyLevel
 
 
@@ -42,6 +43,24 @@ class Exercise(ExerciseBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
+    @validator('muscle_groups', pre=True)
+    def parse_muscle_groups(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return v or []
+
+    @validator('equipment', pre=True)
+    def parse_equipment(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return v or []
+
     class Config:
         from_attributes = True
 
@@ -54,6 +73,24 @@ class ExerciseList(BaseModel):
     equipment: Optional[List[str]] = None
     difficulty_level: Optional[DifficultyLevel] = None
     is_public: bool
+
+    @validator('muscle_groups', pre=True)
+    def parse_muscle_groups(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return v or []
+
+    @validator('equipment', pre=True)
+    def parse_equipment(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return v or []
 
     class Config:
         from_attributes = True

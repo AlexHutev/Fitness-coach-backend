@@ -7,10 +7,15 @@ Run this AFTER setting up the database manually
 import sys
 import os
 from pathlib import Path
+import logging
 
 # Add project root to path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv(project_root / ".env")
 
 try:
     from sqlalchemy import create_engine, text
@@ -18,7 +23,7 @@ try:
     from app.core.database import Base
     from app.models import *  # Import all models
 except ImportError as e:
-    print(f"❌ Error importing modules: {e}")
+    print(f"Error importing modules: {e}")
     print("Make sure you've installed all requirements: pip install -r requirements.txt")
     sys.exit(1)
 
@@ -70,7 +75,11 @@ def main():
     """Main function"""
     print("FitnessCoach Database Setup Test")
     print("=" * 40)
-    print(f"Database URL: {settings.database_url_computed}")
+    
+    # Debug configuration
+    print(f"Environment DATABASE_URL: {os.getenv('DATABASE_URL')}")
+    print(f"Settings database_url: {settings.database_url}")
+    print(f"Computed Database URL: {settings.database_url_computed}")
     print("=" * 40)
     
     # Test connection
