@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.utils.deps import get_current_user
+from app.utils.deps import get_current_trainer
 from app.models.user import User
 from app.services.program_service import ProgramService
 from app.schemas.program import (
@@ -17,15 +17,9 @@ router = APIRouter()
 def create_program(
     program_data: ProgramCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_trainer)
 ):
     """Create a new training program"""
-    if current_user.role != "TRAINER":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers can create programs"
-        )
-    
     try:
         program = ProgramService.create_program(db, program_data, current_user.id)
         return program
@@ -44,15 +38,9 @@ def get_programs(
     difficulty_level: Optional[str] = Query(None),
     is_template: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_trainer)
 ):
     """Get all programs for the current trainer"""
-    if current_user.role != "TRAINER":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers can view programs"
-        )
-    
     programs = ProgramService.get_programs(
         db=db,
         trainer_id=current_user.id,
@@ -69,15 +57,9 @@ def get_programs(
 def search_programs(
     search_term: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_trainer)
 ):
     """Search programs by name, description, or tags"""
-    if current_user.role != "TRAINER":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers can search programs"
-        )
-    
     programs = ProgramService.search_programs(db, current_user.id, search_term)
     return programs
 
@@ -86,15 +68,9 @@ def search_programs(
 def get_program(
     program_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_trainer)
 ):
     """Get a specific program by ID"""
-    if current_user.role != "TRAINER":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers can view programs"
-        )
-    
     program = ProgramService.get_program(db, program_id, current_user.id)
     if not program:
         raise HTTPException(
@@ -109,15 +85,9 @@ def update_program(
     program_id: int,
     program_update: ProgramUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_trainer)
 ):
     """Update an existing program"""
-    if current_user.role != "TRAINER":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers can update programs"
-        )
-    
     program = ProgramService.update_program(db, program_id, program_update, current_user.id)
     if not program:
         raise HTTPException(
@@ -131,15 +101,9 @@ def update_program(
 def delete_program(
     program_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_trainer)
 ):
     """Delete a program"""
-    if current_user.role != "TRAINER":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers can delete programs"
-        )
-    
     success = ProgramService.delete_program(db, program_id, current_user.id)
     if not success:
         raise HTTPException(
@@ -153,15 +117,9 @@ def duplicate_program(
     program_id: int,
     new_name: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_trainer)
 ):
     """Create a copy of an existing program"""
-    if current_user.role != "TRAINER":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers can duplicate programs"
-        )
-    
     program = ProgramService.duplicate_program(db, program_id, current_user.id, new_name)
     if not program:
         raise HTTPException(

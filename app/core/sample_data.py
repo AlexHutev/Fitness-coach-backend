@@ -14,7 +14,8 @@ def seed_sample_exercises(db: Session):
         return
     
     # Get the first trainer user to assign as creator
-    trainer = db.query(User).filter(User.role == "TRAINER").first()
+    from app.models.user import UserRole
+    trainer = db.query(User).filter(User.role == UserRole.TRAINER).first()
     if not trainer:
         print("No trainer found, creating sample exercises with creator_id=1")
         creator_id = 1

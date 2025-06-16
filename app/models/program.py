@@ -34,7 +34,7 @@ class Program(Base):
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     program_type = Column(SQLEnum(ProgramType), nullable=False)
-    difficulty_level = Column(String(20), nullable=False)
+    difficulty_level = Column(SQLEnum(DifficultyLevel), nullable=False)
     duration_weeks = Column(Integer, nullable=True)
     sessions_per_week = Column(Integer, nullable=True)
     
