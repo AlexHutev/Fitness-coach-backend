@@ -1,13 +1,20 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 from app.core.database import get_db
 from app.utils.deps import get_current_trainer
 from app.models.user import User
+from app.models.program import Program
+from app.models.client import Client
 from app.services.program_service import ProgramService
 from app.schemas.program import (
-    ProgramCreate, ProgramUpdate, Program, ProgramList, ProgramAssignment
+    ProgramCreate, ProgramUpdate, Program, ProgramList
+)
+from app.schemas.program_assignment import (
+    ProgramAssignment, ProgramAssignmentUpdate, ProgramAssignmentWithDetails,
+    ProgressUpdate, AssignmentRequest
 )
 
 router = APIRouter()
@@ -127,3 +134,69 @@ def duplicate_program(
             detail="Program not found"
         )
     return program
+
+
+
+# Program Assignment endpoints
+@router.post("/{program_id}/assign", response_model=List[ProgramAssignment])
+def assign_program(
+    program_id: int,
+    assignment_request: AssignmentRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_trainer)
+):
+    """Assign a program to one or more clients"""
+    from app.services.program_assignment_service import ProgramAssignmentService
+    from app.schemas.program_assignment import BulkAssignmentCreate, AssignmentRequest
+    
+    # Validate that we have client IDs
+    if not assignment_request.client_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one client must be selected"
+        )
+    
+    # Create bulk assignment data with program_id from URL
+    bulk_data = BulkAssignmentCreate(
+        program_id=program_id,
+        client_ids=assignment_request.client_ids,
+        start_date=assignment_request.start_date,
+        custom_notes=assignment_request.custom_notes
+    )
+    
+    try:
+        assignments = ProgramAssignmentService.bulk_assign(db, bulk_data, current_user.id)
+        
+        # If no assignments were created, provide helpful feedback
+        if not assignments:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No assignments were created. All selected clients may already have active program assignments."
+            )
+        
+        return assignments
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+
+
+@router.get("/clients/{client_id}/active-assignment", response_model=Optional[ProgramAssignment])
+def get_client_active_assignment(
+    client_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_trainer)
+):
+    """Get client's active program assignment"""
+    from app.services.program_assignment_service import ProgramAssignmentService
+    
+    assignment = ProgramAssignmentService.get_client_active_assignment(
+        db, client_id, current_user.id
+    )
+    return assignment

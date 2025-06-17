@@ -2,6 +2,7 @@
 from .user import User, UserRole, SpecializationType, ExperienceLevel
 from .client import Client, Gender, ActivityLevel, GoalType
 from .program import Program, Exercise, ProgramType, DifficultyLevel
+from .program_assignment import ProgramAssignment, AssignmentStatus
 from .nutrition import NutritionPlan, Food
 
 __all__ = [
@@ -9,6 +10,7 @@ __all__ = [
     "Client", 
     "Program",
     "Exercise",
+    "ProgramAssignment",
     "NutritionPlan",
     "Food",
     "UserRole",
@@ -19,4 +21,5 @@ __all__ = [
     "GoalType",
     "ProgramType",
     "DifficultyLevel",
+    "AssignmentStatus",
 ]
