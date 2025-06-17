@@ -135,3 +135,4 @@ def verify_token(
         "user_id": current_user.id,
         "email": current_user.email
     }
+    
