@@ -100,8 +100,8 @@ def test_get_assignments(token):
     """Test getting assignments"""
     headers = get_headers(token)
     
-    print("\n[INFO] Testing GET /api/v1/programs/assignments")
-    response = requests.get(f"{BASE_URL}/api/v1/programs/assignments", headers=headers)
+    print("\n[INFO] Testing GET /api/v1/assignments")
+    response = requests.get(f"{BASE_URL}/api/v1/assignments", headers=headers)
     
     if response.status_code == 200:
         assignments = response.json()
