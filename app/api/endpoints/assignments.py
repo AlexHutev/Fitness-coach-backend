@@ -61,7 +61,14 @@ def get_trainer_assignments(
         query = query.filter(ProgramAssignmentModel.client_id == client_id)
     
     if status_filter:
-        query = query.filter(ProgramAssignmentModel.status == status_filter)
+        # Convert string to enum for proper comparison
+        from app.models.program_assignment import AssignmentStatus
+        try:
+            status_enum = AssignmentStatus(status_filter.lower())
+            query = query.filter(ProgramAssignmentModel.status == status_enum)
+        except ValueError:
+            # If invalid status, filter will return no results
+            query = query.filter(ProgramAssignmentModel.status == 'invalid_status')
     
     assignments = query.order_by(ProgramAssignmentModel.created_at.desc()).all()
     
@@ -86,6 +93,10 @@ def get_trainer_assignments(
             program_name=assignment.program.name,
             program_type=assignment.program.program_type.value,
             program_difficulty=assignment.program.difficulty_level.value,
+            program_description=assignment.program.description,
+            workout_structure=ProgramAssignmentService.enhance_workout_structure_with_exercise_names(
+                db, assignment.program.workout_structure or []
+            ),
             client_email=assignment.client.email
         )
         for assignment in assignments
@@ -139,6 +150,10 @@ def get_assignment_details(
         program_name=assignment.program.name,
         program_type=assignment.program.program_type.value,
         program_difficulty=assignment.program.difficulty_level.value,
+        program_description=assignment.program.description,
+        workout_structure=ProgramAssignmentService.enhance_workout_structure_with_exercise_names(
+            db, assignment.program.workout_structure or []
+        ),
         client_email=assignment.client.email
     )
 

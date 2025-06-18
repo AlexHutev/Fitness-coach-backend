@@ -1,10 +1,10 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from datetime import datetime, timedelta
 
 from app.models.program_assignment import ProgramAssignment, AssignmentStatus
-from app.models.program import Program
+from app.models.program import Program, Exercise
 from app.models.client import Client
 from app.schemas.program_assignment import (
     ProgramAssignmentCreate, 
@@ -260,3 +260,48 @@ class ProgramAssignmentService:
                 ProgramAssignment.status == AssignmentStatus.ACTIVE
             )
         ).first()
+
+    @staticmethod
+    def enhance_workout_structure_with_exercise_names(
+        db: Session,
+        workout_structure: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Enhance workout structure by adding exercise names to exercises"""
+        if not workout_structure:
+            return workout_structure
+        
+        # Collect all exercise IDs
+        exercise_ids = set()
+        for day in workout_structure:
+            if 'exercises' in day:
+                for exercise in day['exercises']:
+                    if 'exercise_id' in exercise:
+                        exercise_ids.add(exercise['exercise_id'])
+        
+        # Fetch exercise names in bulk
+        if exercise_ids:
+            exercises = db.query(Exercise.id, Exercise.name).filter(
+                Exercise.id.in_(exercise_ids)
+            ).all()
+            exercise_name_map = {ex.id: ex.name for ex in exercises}
+        else:
+            exercise_name_map = {}
+        
+        # Enhance the structure with exercise names
+        enhanced_structure = []
+        for day in workout_structure:
+            enhanced_day = day.copy()
+            if 'exercises' in enhanced_day:
+                enhanced_exercises = []
+                for exercise in enhanced_day['exercises']:
+                    enhanced_exercise = exercise.copy()
+                    if 'exercise_id' in enhanced_exercise:
+                        exercise_id = enhanced_exercise['exercise_id']
+                        enhanced_exercise['exercise_name'] = exercise_name_map.get(
+                            exercise_id, f'Exercise {exercise_id}'
+                        )
+                    enhanced_exercises.append(enhanced_exercise)
+                enhanced_day['exercises'] = enhanced_exercises
+            enhanced_structure.append(enhanced_day)
+        
+        return enhanced_structure

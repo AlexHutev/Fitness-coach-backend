@@ -52,6 +52,8 @@ class ProgramAssignmentWithDetails(ProgramAssignment):
     program_name: str
     program_type: str
     program_difficulty: str
+    program_description: Optional[str] = None
+    workout_structure: Optional[List[dict]] = None
     client_name: str
     client_email: Optional[str]
 
