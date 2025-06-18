@@ -23,6 +23,7 @@ class ClientBase(BaseModel):
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
     notes: Optional[str] = None
+    custom_password: Optional[str] = None  # For account creation
 
 
 class ClientCreate(ClientBase):

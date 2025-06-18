@@ -24,7 +24,8 @@ def create_client_with_account(
         user, client, temp_password = ClientAccountService.create_client_account(
             db=db,
             trainer_id=current_user.id,
-            client_data=client_create
+            client_data=client_create,
+            custom_password=client_create.custom_password
         )
         
         return {
