@@ -31,23 +31,33 @@ class ProgramAssignment(Base):
     end_date = Column(DateTime(timezone=True), nullable=True)
     status = Column(SQLEnum(AssignmentStatus), default=AssignmentStatus.ACTIVE)
     
+    # Client access credentials (for client login)
+    client_access_email = Column(String(255), nullable=True)  # Optional separate client email
+    client_hashed_password = Column(String(255), nullable=True)  # For client login
+    
     # Customization
     custom_notes = Column(Text, nullable=True)
     trainer_notes = Column(Text, nullable=True)
+    assignment_notes = Column(Text, nullable=True)
+    trainer_feedback = Column(Text, nullable=True)
     
     # Progress tracking
     completion_percentage = Column(Integer, default=0)  # 0-100
     sessions_completed = Column(Integer, default=0)
     total_sessions = Column(Integer, nullable=True)
+    total_workouts = Column(Integer, default=0)
+    completed_workouts = Column(Integer, default=0)
+    last_workout_date = Column(DateTime, nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    program = relationship("Program", backref="assignments")
-    client = relationship("Client", backref="program_assignments")
-    trainer = relationship("User", backref="program_assignments")
+    program = relationship("Program")
+    client = relationship("Client")
+    trainer = relationship("User")
+    workout_logs = relationship("WorkoutLog", back_populates="assignment")
     
     def __repr__(self):
         return f"<ProgramAssignment {self.program_id} -> {self.client_id}>"

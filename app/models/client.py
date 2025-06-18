@@ -34,6 +34,7 @@ class Client(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     trainer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Link to client's user account
     
     # Personal information
     first_name = Column(String(100), nullable=False)
@@ -68,7 +69,8 @@ class Client(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    trainer = relationship("User", back_populates="clients")
+    trainer = relationship("User", back_populates="clients", foreign_keys=[trainer_id])
+    user_account = relationship("User", foreign_keys=[user_id])  # Client's login account
     
     def __repr__(self):
         return f"<Client {self.first_name} {self.last_name}>"
@@ -76,4 +78,4 @@ class Client(Base):
 
 # Add relationship to User model
 from app.models.user import User
-User.clients = relationship("Client", back_populates="trainer")
+User.clients = relationship("Client", back_populates="trainer", foreign_keys="Client.trainer_id")

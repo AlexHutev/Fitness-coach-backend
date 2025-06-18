@@ -81,6 +81,11 @@ class Client(ClientInDB):
     pass
 
 
+class ClientAccountCreate(BaseModel):
+    email: EmailStr
+    custom_password: Optional[str] = None  # If not provided, will generate temporary password
+
+
 class ClientSummary(BaseModel):
     id: int
     first_name: str

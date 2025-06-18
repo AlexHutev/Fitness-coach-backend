@@ -6,6 +6,7 @@ import enum
 
 class UserRole(enum.Enum):
     TRAINER = "trainer"
+    CLIENT = "client"
     ADMIN = "admin"
 
 
