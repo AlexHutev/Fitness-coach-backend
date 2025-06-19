@@ -5,6 +5,7 @@ from .program import Program, Exercise, ProgramType, DifficultyLevel
 from .program_assignment import ProgramAssignment, AssignmentStatus
 from .workout_tracking import WorkoutLog, ExerciseLog
 from .nutrition import NutritionPlan, Food
+from .schedule import Appointment, AppointmentType, AppointmentStatus
 
 __all__ = [
     "User",
@@ -16,6 +17,7 @@ __all__ = [
     "ExerciseLog",
     "NutritionPlan",
     "Food",
+    "Appointment",
     "UserRole",
     "SpecializationType", 
     "ExperienceLevel",
@@ -25,4 +27,6 @@ __all__ = [
     "ProgramType",
     "DifficultyLevel",
     "AssignmentStatus",
+    "AppointmentType",
+    "AppointmentStatus",
 ]
