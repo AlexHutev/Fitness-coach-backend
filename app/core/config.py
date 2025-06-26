@@ -45,8 +45,8 @@ class Settings(BaseSettings):
         if self.database_url:
             return self.database_url
         
-        # Otherwise construct MySQL URL
-        return f"mysql+pymysql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+        # Default to SQLite for development
+        return "sqlite:///./fitness_coach.db"
     
     class Config:
         env_file = ".env"

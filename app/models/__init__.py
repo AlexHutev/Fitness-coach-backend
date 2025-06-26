@@ -4,6 +4,7 @@ from .client import Client, Gender, ActivityLevel, GoalType
 from .program import Program, Exercise, ProgramType, DifficultyLevel
 from .program_assignment import ProgramAssignment, AssignmentStatus
 from .workout_tracking import WorkoutLog, ExerciseLog
+from .weekly_exercise import WeeklyExerciseAssignment, WeeklyExerciseStatus
 from .nutrition import NutritionPlan, Food
 from .schedule import Appointment, AppointmentType, AppointmentStatus
 
@@ -15,6 +16,7 @@ __all__ = [
     "ProgramAssignment",
     "WorkoutLog",
     "ExerciseLog",
+    "WeeklyExerciseAssignment",
     "NutritionPlan",
     "Food",
     "Appointment",
@@ -27,6 +29,7 @@ __all__ = [
     "ProgramType",
     "DifficultyLevel",
     "AssignmentStatus",
+    "WeeklyExerciseStatus",
     "AppointmentType",
     "AppointmentStatus",
 ]

@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from datetime import datetime, timedelta
+import logging
 
 from app.models.program_assignment import ProgramAssignment, AssignmentStatus
 from app.models.program import Program, Exercise
@@ -12,6 +13,8 @@ from app.schemas.program_assignment import (
     BulkAssignmentCreate,
     ProgressUpdate
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ProgramAssignmentService:
@@ -67,6 +70,14 @@ class ProgramAssignmentService:
         db.add(assignment)
         db.commit()
         db.refresh(assignment)
+        
+        # Generate weekly exercise assignments
+        try:
+            from app.services.weekly_exercise_service import WeeklyExerciseService
+            WeeklyExerciseService.generate_weekly_exercises_from_assignment(db, assignment)
+        except Exception as e:
+            logger.warning(f"Failed to generate weekly exercises for assignment {assignment.id}: {e}")
+        
         return assignment
     
     @staticmethod
@@ -224,6 +235,15 @@ class ProgramAssignmentService:
                 )
                 
                 db.add(assignment)
+                db.flush()  # Ensure assignment gets an ID
+                
+                # Generate weekly exercise assignments
+                try:
+                    from app.services.weekly_exercise_service import WeeklyExerciseService
+                    WeeklyExerciseService.generate_weekly_exercises_from_assignment(db, assignment)
+                except Exception as e:
+                    logger.warning(f"Failed to generate weekly exercises for assignment {assignment.id}: {e}")
+                
                 assignments.append(assignment)
                 
             except Exception as e:
