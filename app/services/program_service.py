@@ -84,25 +84,42 @@ class ProgramService:
         trainer_id: int
     ) -> Optional[Program]:
         """Update a program."""
+        print(f"🔄 Updating program {program_id} for trainer {trainer_id}")
+        print(f"📊 Update data received: {program_data}")
+        
         program = ProgramService.get_program(db, program_id, trainer_id)
         if not program:
+            print(f"❌ Program {program_id} not found for trainer {trainer_id}")
             return None
         
         # Update fields that were provided
         update_data = program_data.dict(exclude_unset=True)
+        print(f"📋 Fields to update: {list(update_data.keys())}")
         
         for field, value in update_data.items():
+            print(f"🔧 Updating {field}: {type(value)} - {value}")
             if field == "workout_structure" and value is not None:
                 # Convert workout_structure to JSON for storage
-                value = [day.dict() for day in value]
+                # Check if it's already dictionaries or Pydantic models
+                if isinstance(value, list) and len(value) > 0:
+                    if hasattr(value[0], 'dict'):
+                        # It's Pydantic models, convert to dict
+                        value = [day.dict() for day in value]
+                        print(f"🏋️ Converted Pydantic workout_structure: {value}")
+                    else:
+                        # It's already dictionaries, use as-is
+                        print(f"🏋️ Using existing dict workout_structure: {value}")
             elif field == "equipment_needed" and value is not None:
                 # Convert equipment list to JSON string
                 value = json.dumps(value)
+                print(f"🎯 Converted equipment_needed: {value}")
             
             setattr(program, field, value)
         
+        print(f"💾 Committing changes to database...")
         db.commit()
         db.refresh(program)
+        print(f"✅ Program updated successfully")
         return program
     
     @staticmethod

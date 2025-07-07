@@ -47,6 +47,8 @@ def get_client_current_week_exercises(
             **exercise.__dict__,
             'exercise_name': exercise.exercise.name if exercise.exercise else 'Unknown Exercise',
             'exercise_description': exercise.exercise.description if exercise.exercise else '',
+            'exercise_video_url': exercise.exercise.video_url if exercise.exercise else '',
+            'exercise_instructions': exercise.exercise.instructions if exercise.exercise else '',
             'muscle_groups': muscle_groups,
             'program_name': exercise.program_assignment.program.name if exercise.program_assignment.program else '',
             'client_name': f"{exercise.client.first_name} {exercise.client.last_name}" if exercise.client else '',
@@ -89,6 +91,8 @@ def get_client_week_exercises(
             **exercise.__dict__,
             'exercise_name': exercise.exercise.name if exercise.exercise else 'Unknown Exercise',
             'exercise_description': exercise.exercise.description if exercise.exercise else '',
+            'exercise_video_url': exercise.exercise.video_url if exercise.exercise else '',
+            'exercise_instructions': exercise.exercise.instructions if exercise.exercise else '',
             'muscle_groups': muscle_groups,
             'program_name': exercise.program_assignment.program.name if exercise.program_assignment.program else '',
             'client_name': f"{exercise.client.first_name} {exercise.client.last_name}" if exercise.client else '',
@@ -156,15 +160,21 @@ def get_client_weekly_schedule(
         
         exercise_data = {
             'id': exercise.id,
+            'exercise_id': exercise.exercise_id,
             'exercise_name': exercise.exercise.name if exercise.exercise else 'Unknown Exercise',
+            'exercise_description': exercise.exercise.description if exercise.exercise else '',
+            'exercise_video_url': exercise.exercise.video_url if exercise.exercise else '',
+            'exercise_instructions': exercise.exercise.instructions if exercise.exercise else '',
             'sets': exercise.sets,
             'reps': exercise.reps,
             'weight': exercise.weight,
             'rest_seconds': exercise.rest_seconds,
+            'exercise_notes': exercise.exercise_notes,
             'status': exercise.status.value,
             'completion_percentage': exercise.completion_percentage,
             'due_date': exercise.due_date,
-            'exercise_order': exercise.exercise_order
+            'exercise_order': exercise.exercise_order,
+            'day_number': exercise.day_number
         }
         days[day_key].append(exercise_data)
         

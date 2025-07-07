@@ -95,13 +95,34 @@ def update_program(
     current_user: User = Depends(get_current_trainer)
 ):
     """Update an existing program"""
-    program = ProgramService.update_program(db, program_id, program_update, current_user.id)
-    if not program:
+    print(f"🎯 PUT /programs/{program_id} called by user {current_user.id}")
+    print(f"📨 Request data type: {type(program_update)}")
+    print(f"📨 Request data: {program_update}")
+    
+    try:
+        # Add detailed logging
+        print(f"🔧 Calling ProgramService.update_program...")
+        program = ProgramService.update_program(db, program_id, program_update, current_user.id)
+        if not program:
+            print(f"❌ Program {program_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Program not found"
+            )
+        print(f"✅ Program updated successfully: {program.id}")
+        return program
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"💥 Error updating program: {e}")
+        print(f"📊 Traceback: {error_traceback}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Program not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating program: {str(e)}"
         )
-    return program
 
 
 @router.delete("/{program_id}", status_code=status.HTTP_204_NO_CONTENT)

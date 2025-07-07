@@ -62,6 +62,8 @@ class WeeklyExerciseResponse(WeeklyExerciseBase):
     # Include exercise details
     exercise_name: Optional[str] = None
     exercise_description: Optional[str] = None
+    exercise_video_url: Optional[str] = None
+    exercise_instructions: Optional[str] = None
     muscle_groups: Optional[list] = None
     
     class Config:
