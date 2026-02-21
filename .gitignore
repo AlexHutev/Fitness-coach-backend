@@ -79,3 +79,17 @@ logs/
 
 # Alembic
 versions/
+
+# Environment files (all variants)
+.env
+.env.*
+
+# One-off scripts (debug, test, fix, migration)
+test_*.py
+check_*.py
+debug_*.py
+fix_*.py
+add_*.py
+migrate_*.py
+create_sample_*.py
+create_test_*.py
