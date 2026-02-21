@@ -57,6 +57,7 @@ class User(Base):
     
     # Relationships
     appointments = relationship("Appointment", back_populates="trainer")
+    notifications = relationship("Notification", back_populates="user", order_by="desc(Notification.created_at)")
     
     def __repr__(self):
         return f"<User {self.email}>"

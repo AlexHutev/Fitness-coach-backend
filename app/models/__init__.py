@@ -7,6 +7,7 @@ from .workout_tracking import WorkoutLog, ExerciseLog
 from .weekly_exercise import WeeklyExerciseAssignment, WeeklyExerciseStatus
 from .nutrition import NutritionPlan, Food
 from .schedule import Appointment, AppointmentType, AppointmentStatus
+from .notification import Notification, NotificationType
 
 __all__ = [
     "User",
@@ -20,6 +21,7 @@ __all__ = [
     "NutritionPlan",
     "Food",
     "Appointment",
+    "Notification",
     "UserRole",
     "SpecializationType", 
     "ExperienceLevel",
@@ -32,4 +34,5 @@ __all__ = [
     "WeeklyExerciseStatus",
     "AppointmentType",
     "AppointmentStatus",
+    "NotificationType",
 ]

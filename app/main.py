@@ -9,6 +9,17 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import all models at module level to register them with SQLAlchemy
+from app.models.user import User
+from app.models.client import Client
+from app.models.program import Program, Exercise
+from app.models.program_assignment import ProgramAssignment
+from app.models.workout_tracking import WorkoutLog, ExerciseLog
+from app.models.weekly_exercise import WeeklyExerciseAssignment
+from app.models.nutrition import NutritionPlan, Food
+from app.models.schedule import Appointment
+from app.models.notification import Notification
+
 # Create FastAPI application
 app = FastAPI(
     title="FitnessCoach API",
@@ -77,6 +88,14 @@ async def startup_event():
     logger.info("FitnessCoach API starting up...")
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Database URL: {settings.database_url.split('@')[1] if '@' in settings.database_url else 'Not configured'}")
+    
+    # Create all tables (including new ones like notifications)
+    try:
+        from app.core.database import engine, Base
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created/verified successfully")
+    except Exception as e:
+        logger.error(f"Error creating database tables: {e}")
     
     # Seed sample data
     try:

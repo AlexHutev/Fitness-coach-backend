@@ -7,6 +7,11 @@ from .client import (
     Client, ClientCreate, ClientUpdate, ClientInDB, ClientSummary,
     ProgressEntry, ProgressCreate, ProgressInDB
 )
+from .notification import (
+    NotificationTypeEnum, NotificationBase, NotificationCreate,
+    NotificationResponse, NotificationListResponse,
+    NotificationMarkReadRequest, NotificationMarkReadResponse
+)
 
 __all__ = [
     # User schemas
@@ -28,4 +33,12 @@ __all__ = [
     "ProgressEntry",
     "ProgressCreate",
     "ProgressInDB",
+    # Notification schemas
+    "NotificationTypeEnum",
+    "NotificationBase",
+    "NotificationCreate",
+    "NotificationResponse",
+    "NotificationListResponse",
+    "NotificationMarkReadRequest",
+    "NotificationMarkReadResponse",
 ]

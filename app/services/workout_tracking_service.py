@@ -3,7 +3,8 @@ from typing import List, Optional
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
-from app.models import WorkoutLog, ExerciseLog, ProgramAssignment
+from app.models import WorkoutLog, ExerciseLog, ProgramAssignment, Client
+from app.models.notification import NotificationType
 from app.schemas.client_schemas import (
     WorkoutLogCreate, WorkoutLogResponse, ExerciseLogResponse,
     ExerciseLogCreate, ExerciseSetData
@@ -66,6 +67,9 @@ class WorkoutTrackingService:
         if workout_data.is_completed:
             assignment.completed_workouts += 1
             assignment.last_workout_date = workout_log.workout_date
+            
+            # Send notification to trainer
+            self._notify_trainer_workout_completed(db, assignment, workout_log)
         
         db.commit()
         db.refresh(workout_log)
@@ -291,6 +295,30 @@ class WorkoutTrackingService:
             skip_reason=workout_log.skip_reason,
             exercises=exercises,
             created_at=workout_log.created_at
+        )
+    
+    def _notify_trainer_workout_completed(
+        self, 
+        db: Session, 
+        assignment: ProgramAssignment, 
+        workout_log: WorkoutLog
+    ) -> None:
+        """Send notification to trainer when client completes a workout"""
+        from app.services.notification_service import NotificationService
+        
+        # Get client info
+        client = db.query(Client).filter(Client.id == assignment.client_id).first()
+        if not client:
+            return
+        
+        # Get trainer_id from client
+        trainer_id = client.trainer_id
+        
+        NotificationService.create_workout_completed_notification(
+            db=db,
+            trainer_id=trainer_id,
+            client=client,
+            workout_log=workout_log
         )
 
 
