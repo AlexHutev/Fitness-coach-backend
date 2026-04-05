@@ -8,6 +8,7 @@ from .weekly_exercise import WeeklyExerciseAssignment, WeeklyExerciseStatus
 from .nutrition import NutritionPlan, Food
 from .schedule import Appointment, AppointmentType, AppointmentStatus
 from .notification import Notification, NotificationType
+from .body_metric import BodyMetric
 
 __all__ = [
     "User",
