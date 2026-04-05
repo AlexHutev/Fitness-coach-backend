@@ -158,16 +158,55 @@ def get_client_dashboard_stats(
             ProgramAssignment.status == AssignmentStatus.ACTIVE
         ).count()
         
-        # Get total completed workouts from all assignments
+        # Get total completed workouts from WorkoutLog table
+        from app.models.workout_tracking import WorkoutLog
         try:
-            total_completed_workouts = db.query(ProgramAssignment).filter(
-                ProgramAssignment.client_id == client_record.id
-            ).with_entities(
-                db.func.sum(ProgramAssignment.completed_workouts)
-            ).scalar() or 0
+            total_completed_workouts = db.query(WorkoutLog).filter(
+                WorkoutLog.client_id == client_record.id,
+                WorkoutLog.is_completed == True
+            ).count()
         except:
             total_completed_workouts = 0
-        
+
+        # Calculate current streak from WorkoutLog dates
+        current_streak = 0
+        try:
+            from datetime import date, timedelta
+            from sqlalchemy import func as sqlfunc
+            # Get distinct workout dates (completed), ordered descending
+            workout_dates = db.query(
+                sqlfunc.date(WorkoutLog.workout_date)
+            ).filter(
+                WorkoutLog.client_id == client_record.id,
+                WorkoutLog.is_completed == True
+            ).distinct().order_by(
+                sqlfunc.date(WorkoutLog.workout_date).desc()
+            ).all()
+
+            if workout_dates:
+                dates = [row[0] for row in workout_dates]
+                # dates[0] is the most recent workout date
+                today = date.today()
+                # Convert to date objects if they are strings
+                def to_date(d):
+                    if isinstance(d, str):
+                        return date.fromisoformat(d)
+                    return d
+                dates = [to_date(d) for d in dates]
+
+                # Streak starts only if the most recent workout was today or yesterday
+                if dates[0] >= today - timedelta(days=1):
+                    streak = 1
+                    for i in range(1, len(dates)):
+                        if dates[i - 1] - dates[i] == timedelta(days=1):
+                            streak += 1
+                        else:
+                            break
+                    current_streak = streak
+        except Exception as e:
+            print(f"Streak calculation error: {e}")
+            current_streak = 0
+
         return {
             "profile_completion": {
                 "percentage": calculate_profile_completion(client_record),
@@ -181,7 +220,7 @@ def get_client_dashboard_stats(
             "program_stats": {
                 "active_programs": active_programs,
                 "completed_workouts": total_completed_workouts,
-                "current_streak": 0,  # TODO: Calculate from workout logs when implemented
+                "current_streak": current_streak,
             }
         }
     
@@ -214,6 +253,51 @@ def calculate_profile_completion(client_record) -> int:
     if client_record.emergency_contact_phone: completed_fields += 1
     
     return round((completed_fields / total_fields) * 100)
+
+
+@router.get("/appointments")
+def get_client_appointments(
+    current_user: User = Depends(get_current_client),
+    db: Session = Depends(get_db)
+):
+    """Get upcoming appointments for this client"""
+    from app.models.schedule import Appointment
+    from datetime import datetime
+
+    client_record = ClientAccountService.get_client_by_user_id(db, current_user.id)
+    if not client_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client profile not found")
+
+    appointments = (
+        db.query(Appointment)
+        .filter(
+            Appointment.client_id == client_record.id,
+            Appointment.start_time >= datetime.utcnow(),
+            Appointment.status.notin_(["cancelled"])
+        )
+        .order_by(Appointment.start_time.asc())
+        .limit(10)
+        .all()
+    )
+
+    return {
+        "appointments": [
+            {
+                "id": a.id,
+                "title": a.title,
+                "description": a.description,
+                "appointment_type": a.appointment_type,
+                "status": a.status,
+                "start_time": a.start_time.isoformat(),
+                "end_time": a.end_time.isoformat(),
+                "duration_minutes": a.duration_minutes,
+                "location": a.location,
+                "notes": a.notes,
+                "trainer_name": f"{a.trainer.first_name} {a.trainer.last_name}" if a.trainer else None,
+            }
+            for a in appointments
+        ]
+    }
 
 
 def get_missing_profile_fields(client_record) -> list:

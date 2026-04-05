@@ -16,7 +16,7 @@ api_router.include_router(assignments.router, prefix="/assignments", tags=["assi
 api_router.include_router(exercises.router, prefix="/exercises", tags=["exercises"])
 api_router.include_router(weekly_exercises.router, prefix="/weekly-exercises", tags=["weekly-exercises"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
-api_router.include_router(appointments_simple.router, prefix="/schedule", tags=["schedule"])
+api_router.include_router(appointments_simple.router, prefix="/appointments", tags=["appointments"])
 api_router.include_router(client_endpoint.router, tags=["client-access"])
 api_router.include_router(client_dashboard.router, prefix="/client-dashboard", tags=["client-dashboard"])
 
