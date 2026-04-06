@@ -5,6 +5,7 @@ from app.api.endpoints import client as client_endpoint
 from app.api.endpoints import weekly_exercises
 from app.api.endpoints import notifications
 from app.api.endpoints import body_metrics
+from app.api.endpoints import workout_completion
 from app.api.endpoints.client_dashboard import dashboard as client_dashboard
 
 api_router = APIRouter()
@@ -19,6 +20,7 @@ api_router.include_router(weekly_exercises.router, prefix="/weekly-exercises", t
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(appointments_simple.router, prefix="/appointments", tags=["appointments"])
 api_router.include_router(body_metrics.router, prefix="/progress", tags=["progress"])
+api_router.include_router(workout_completion.router, prefix="/progress", tags=["progress"])
 api_router.include_router(client_endpoint.router, tags=["client-access"])
 api_router.include_router(client_dashboard.router, prefix="/client-dashboard", tags=["client-dashboard"])
 

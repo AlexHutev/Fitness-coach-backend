@@ -1,1 +1,1 @@
-feat: body metrics progress tracking - charts, history, log form, client and trainer views
+feat: workout completion rate tracking - weekly bar chart, streak, per-week breakdown
