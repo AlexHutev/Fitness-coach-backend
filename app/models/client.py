@@ -73,6 +73,10 @@ class Client(Base):
     user_account = relationship("User", foreign_keys=[user_id])  # Client's login account
     appointments = relationship("Appointment", back_populates="client")
     body_metrics = relationship("BodyMetric", back_populates="client", order_by="BodyMetric.measured_at")
+    performance_records = relationship("PerformanceRecord", back_populates="client", order_by="PerformanceRecord.recorded_at")
+    goal_milestones = relationship("GoalMilestone", back_populates="client", order_by="GoalMilestone.created_at")
+    session_notes = relationship("SessionNote", back_populates="client", order_by="desc(SessionNote.note_date)")
+    session_notes = relationship("SessionNote", back_populates="client", order_by="desc(SessionNote.note_date)")
     
     def __repr__(self):
         return f"<Client {self.first_name} {self.last_name}>"

@@ -1,1 +1,1 @@
-feat: workout completion rate tracking - weekly bar chart, streak, per-week breakdown
+feat: progress tracking steps 2-5 - workout stats, goal milestones, performance PRs, session notes

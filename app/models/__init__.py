@@ -9,31 +9,18 @@ from .nutrition import NutritionPlan, Food
 from .schedule import Appointment, AppointmentType, AppointmentStatus
 from .notification import Notification, NotificationType
 from .body_metric import BodyMetric
+from .performance_record import PerformanceRecord
+from .goal_milestone import GoalMilestone
+from .session_note import SessionNote
 
 __all__ = [
-    "User",
-    "Client", 
-    "Program",
-    "Exercise",
-    "ProgramAssignment",
-    "WorkoutLog",
-    "ExerciseLog",
-    "WeeklyExerciseAssignment",
-    "NutritionPlan",
-    "Food",
-    "Appointment",
-    "Notification",
-    "UserRole",
-    "SpecializationType", 
-    "ExperienceLevel",
-    "Gender",
-    "ActivityLevel",
-    "GoalType",
-    "ProgramType",
-    "DifficultyLevel",
-    "AssignmentStatus",
-    "WeeklyExerciseStatus",
-    "AppointmentType",
-    "AppointmentStatus",
+    "User", "Client", "Program", "Exercise", "ProgramAssignment",
+    "WorkoutLog", "ExerciseLog", "WeeklyExerciseAssignment",
+    "NutritionPlan", "Food", "Appointment", "Notification",
+    "BodyMetric", "PerformanceRecord", "GoalMilestone", "SessionNote",
+    "UserRole", "SpecializationType", "ExperienceLevel",
+    "Gender", "ActivityLevel", "GoalType",
+    "ProgramType", "DifficultyLevel", "AssignmentStatus",
+    "WeeklyExerciseStatus", "AppointmentType", "AppointmentStatus",
     "NotificationType",
 ]
