@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,13 +22,43 @@ from app.models.nutrition import NutritionPlan, Food
 from app.models.schedule import Appointment
 from app.models.notification import Notification
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("FitnessCoach API starting up...")
+    logger.info(f"Environment: {settings.environment}")
+    logger.info(
+        f"Database URL: {settings.database_url.split('@')[1] if '@' in settings.database_url else 'Not configured'}"
+    )
+
+    try:
+        from app.core.database import engine, Base
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created/verified successfully")
+    except Exception as e:
+        logger.error(f"Error creating database tables: {e}")
+
+    try:
+        from app.core.database import SessionLocal
+        from app.core.sample_data import seed_sample_exercises
+        with SessionLocal() as db:
+            seed_sample_exercises(db)
+    except Exception as e:
+        logger.error(f"Error seeding sample data: {e}")
+
+    yield
+
+    logger.info("FitnessCoach API shutting down...")
+
+
 # Create FastAPI application
 app = FastAPI(
     title="FitnessCoach API",
     description="API for fitness coaches to manage clients, training programs, and nutrition plans",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # Add CORS middleware with explicit configuration
@@ -80,38 +112,6 @@ def read_root():
         "docs": "/docs",
         "health": "/api/v1/health"
     }
-
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    logger.info("FitnessCoach API starting up...")
-    logger.info(f"Environment: {settings.environment}")
-    logger.info(f"Database URL: {settings.database_url.split('@')[1] if '@' in settings.database_url else 'Not configured'}")
-    
-    # Create all tables (including new ones like notifications)
-    try:
-        from app.core.database import engine, Base
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created/verified successfully")
-    except Exception as e:
-        logger.error(f"Error creating database tables: {e}")
-    
-    # Seed sample data
-    try:
-        from app.core.database import SessionLocal
-        from app.core.sample_data import seed_sample_exercises
-        db = SessionLocal()
-        seed_sample_exercises(db)
-        db.close()
-    except Exception as e:
-        logger.error(f"Error seeding sample data: {e}")
-
-
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("FitnessCoach API shutting down...")
 
 
 if __name__ == "__main__":
