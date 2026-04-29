@@ -31,13 +31,7 @@ async def lifespan(app: FastAPI):
         f"Database URL: {settings.database_url.split('@')[1] if '@' in settings.database_url else 'Not configured'}"
     )
 
-    try:
-        from app.core.database import engine, Base
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created/verified successfully")
-    except Exception as e:
-        logger.error(f"Error creating database tables: {e}")
-
+    # Schema is managed by Alembic — run `alembic upgrade head` before starting the app.
     try:
         from app.core.database import SessionLocal
         from app.core.sample_data import seed_sample_exercises
@@ -87,16 +81,13 @@ async def http_exception_handler(request, exc):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
-    import traceback
-    error_traceback = traceback.format_exc()
-    logger.error(f"Unhandled exception: {exc}")
-    logger.error(f"Traceback: {error_traceback}")
-    print(f"💥 EXCEPTION: {exc}")
-    print(f"📊 TRACEBACK: {error_traceback}")
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"}
-    )
+    # Log first…
+    logger.exception("Unhandled exception during request: %s %s", request.method, request.url.path)
+    # …then re-raise so Starlette's default 500 handler responds. That path
+    # routes through the CORS middleware, so the browser sees the
+    # Access-Control-Allow-Origin header instead of a CORS-blocked response
+    # that would mask the real error.
+    raise exc
 
 
 # Include API router

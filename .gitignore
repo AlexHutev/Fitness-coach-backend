@@ -77,8 +77,9 @@ Thumbs.db
 *.log
 logs/
 
-# Alembic
-versions/
+# Alembic — version files MUST be tracked (they're the schema source of truth).
+# Only ignore Python bytecode within the versions folder, not the migrations themselves.
+alembic/versions/__pycache__/
 
 # Environment files (all variants)
 .env

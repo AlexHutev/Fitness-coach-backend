@@ -27,11 +27,12 @@ A FastAPI-based backend application for fitness coaches to manage clients, train
 ## 🛠️ Tech Stack
 
 - **Framework**: FastAPI 0.104.1
-- **Database**: MySQL with SQLAlchemy ORM
+- **Database**: PostgreSQL 16 with SQLAlchemy 2.0 ORM
+- **Driver**: psycopg 3 (`postgresql+psycopg://...`)
 - **Authentication**: JWT tokens with python-jose
 - **Password Hashing**: bcrypt via passlib
-- **Migrations**: Alembic
-- **Validation**: Pydantic schemas
+- **Migrations**: Alembic (sole source of schema truth — no `create_all`)
+- **Validation**: Pydantic v2 + pydantic-settings
 - **CORS**: Enabled for frontend integration
 
 ## 📁 Project Structure
@@ -72,24 +73,24 @@ fitness-coach/
 ## 🚦 Getting Started
 
 ### Prerequisites
-- Python 3.9+
-- MySQL 8.0+
-- pip or conda
+- Python 3.11+
+- Docker Desktop (for the local Postgres service) — or a local Postgres 14+ install
+- pip
 
 ### Installation
 
-1. **Clone and navigate to the project**:
+1. **Navigate to the project**:
    ```bash
    cd C:/university/fitness-coach
    ```
 
-2. **Create virtual environment**:
+2. **Create and activate a virtual environment**:
    ```bash
    python -m venv venv
-   
+
    # Windows
    venv\Scripts\activate
-   
+
    # Mac/Linux
    source venv/bin/activate
    ```
@@ -99,41 +100,39 @@ fitness-coach/
    pip install -r requirements.txt
    ```
 
-4. **Setup environment variables**:
+4. **Set up environment variables**:
    ```bash
    cp .env.example .env
-   # Edit .env with your database credentials
+   # Adjust DATABASE_URL if you're not using the default docker-compose Postgres
    ```
 
-5. **Create MySQL database**:
+5. **Start PostgreSQL via docker-compose**:
+   ```bash
+   docker compose up -d
+   # Verify it's healthy:
+   docker compose ps
+   ```
+
+   The default `DATABASE_URL` matches the compose service:
+   `postgresql+psycopg://fitness_coach:fitness_coach@localhost:5433/fitness_coach`
+
+   **Alternative** — if you have a local Postgres install instead, create the DB and user manually:
    ```sql
-   CREATE DATABASE fitness_coach_db;
-   CREATE USER 'fitness_coach_user'@'localhost' IDENTIFIED BY 'your_password';
-   GRANT ALL PRIVILEGES ON fitness_coach_db.* TO 'fitness_coach_user'@'localhost';
-   FLUSH PRIVILEGES;
+   CREATE USER fitness_coach WITH PASSWORD 'fitness_coach';
+   CREATE DATABASE fitness_coach OWNER fitness_coach;
    ```
 
-6. **Setup database**:
+6. **Apply database migrations** (Alembic is the sole schema source):
    ```bash
-   python setup_db.py
-   ```
-
-7. **Initialize Alembic**:
-   ```bash
-   alembic stamp head
-   alembic revision --autogenerate -m "Initial migration"
    alembic upgrade head
    ```
 
-8. **Create sample users** (optional):
-   ```bash
-   python create_sample_users.py
-   ```
-
-9. **Run the application**:
+7. **Run the application**:
    ```bash
    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
+
+   Sample exercises are seeded automatically on first startup (idempotent — safe on every boot).
 
 ### API Documentation
 - **Swagger UI**: http://localhost:8000/docs
@@ -231,12 +230,8 @@ alembic downgrade -1
 Key environment variables in `.env`:
 
 ```env
-# Database
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=fitness_coach_user
-DB_PASSWORD=your_password
-DB_NAME=fitness_coach_db
+# Database (PostgreSQL via docker-compose)
+DATABASE_URL=postgresql+psycopg://fitness_coach:fitness_coach@localhost:5433/fitness_coach
 
 # Security
 SECRET_KEY=your-secret-key-here
