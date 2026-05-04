@@ -11,6 +11,7 @@ from app.api.endpoints import performance_records
 from app.api.endpoints import goal_milestones
 from app.api.endpoints import session_notes
 from app.api.endpoints.client_dashboard import dashboard as client_dashboard
+from app.api.endpoints import dashboard
 
 api_router = APIRouter()
 
@@ -31,6 +32,7 @@ api_router.include_router(goal_milestones.router, prefix="/progress", tags=["pro
 api_router.include_router(session_notes.router, prefix="/progress", tags=["progress"])
 api_router.include_router(client_endpoint.router, tags=["client-access"])
 api_router.include_router(client_dashboard.router, prefix="/client-dashboard", tags=["client-dashboard"])
+api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 
 
 @api_router.get("/health")
