@@ -1,40 +1,33 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from app.models.user import User, UserRole
-from app.models.client import Client
-from app.core.security import get_password_hash
-from app.schemas.user import UserCreate
-from app.schemas.client import ClientCreate
 import secrets
 import string
-from typing import Optional
+from typing import List, Optional, Tuple
+
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import get_password_hash
+from app.models.client import Client
+from app.models.user import User, UserRole
+from app.schemas.client import ClientCreate
 
 
 class ClientAccountService:
-    """Service for managing client user accounts and linking them to client records"""
-    
+    """Manages client user accounts and links them to client records."""
+
     @staticmethod
     def generate_temp_password(length: int = 8) -> str:
-        """Generate a temporary password for new client accounts"""
         alphabet = string.ascii_letters + string.digits
-        return ''.join(secrets.choice(alphabet) for _ in range(length))
-    
+        return "".join(secrets.choice(alphabet) for _ in range(length))
+
     @staticmethod
-    def create_client_account(
-        db: Session,
+    async def create_client_account(
+        db: AsyncSession,
         trainer_id: int,
         client_data: ClientCreate,
-        custom_password: Optional[str] = None
-    ) -> tuple[User, Client, str]:
-        """
-        Create both a client record and a user account for the client.
-        Returns (user, client, temporary_password)
-        """
-        
-        # Generate temporary password if not provided
+        custom_password: Optional[str] = None,
+    ) -> Tuple[User, Client, str]:
         temp_password = custom_password or ClientAccountService.generate_temp_password()
-        
-        # Create user account for client
+
         client_user = User(
             email=client_data.email,
             first_name=client_data.first_name,
@@ -43,13 +36,11 @@ class ClientAccountService:
             hashed_password=get_password_hash(temp_password),
             role=UserRole.CLIENT,
             is_active=True,
-            is_verified=False  # Client should verify on first login
+            is_verified=False,
         )
-        
         db.add(client_user)
-        db.flush()  # Get the user ID
-        
-        # Create client record linked to user account
+        await db.flush()
+
         client = Client(
             trainer_id=trainer_id,
             user_id=client_user.id,
@@ -69,51 +60,48 @@ class ClientAccountService:
             injuries=client_data.injuries,
             emergency_contact_name=client_data.emergency_contact_name,
             emergency_contact_phone=client_data.emergency_contact_phone,
-            notes=client_data.notes
+            notes=client_data.notes,
         )
-        
         db.add(client)
-        db.commit()
-        db.refresh(client_user)
-        db.refresh(client)
-        
+        await db.commit()
+        await db.refresh(client_user)
+        await db.refresh(client)
+
         return client_user, client, temp_password
-    
+
     @staticmethod
-    def get_client_by_user_id(db: Session, user_id: int) -> Optional[Client]:
-        """Get client record by user account ID"""
-        return db.query(Client).filter(Client.user_id == user_id).first()
-    
+    async def get_client_by_user_id(db: AsyncSession, user_id: int) -> Optional[Client]:
+        result = await db.execute(select(Client).where(Client.user_id == user_id))
+        return result.scalar_one_or_none()
+
     @staticmethod
-    def get_trainer_clients_with_accounts(db: Session, trainer_id: int):
-        """Get all clients for a trainer, including their user account info"""
-        return db.query(Client).filter(
-            and_(
-                Client.trainer_id == trainer_id,
-                Client.is_active == True
+    async def get_trainer_clients_with_accounts(
+        db: AsyncSession, trainer_id: int
+    ) -> List[Client]:
+        result = await db.execute(
+            select(Client).where(
+                and_(Client.trainer_id == trainer_id, Client.is_active.is_(True))
             )
-        ).all()
-    
+        )
+        return list(result.scalars().all())
+
     @staticmethod
-    def link_existing_client_to_account(
-        db: Session,
+    async def link_existing_client_to_account(
+        db: AsyncSession,
         client_id: int,
         email: str,
-        custom_password: Optional[str] = None
-    ) -> tuple[User, str]:
-        """Link an existing client record to a new user account"""
-        
-        client = db.query(Client).filter(Client.id == client_id).first()
+        custom_password: Optional[str] = None,
+    ) -> Tuple[User, str]:
+        client = (
+            await db.execute(select(Client).where(Client.id == client_id))
+        ).scalar_one_or_none()
         if not client:
             raise ValueError("Client not found")
-        
         if client.user_id:
             raise ValueError("Client already has a linked account")
-        
-        # Generate temporary password
+
         temp_password = custom_password or ClientAccountService.generate_temp_password()
-        
-        # Create user account
+
         client_user = User(
             email=email,
             first_name=client.first_name,
@@ -122,18 +110,16 @@ class ClientAccountService:
             hashed_password=get_password_hash(temp_password),
             role=UserRole.CLIENT,
             is_active=True,
-            is_verified=False
+            is_verified=False,
         )
-        
         db.add(client_user)
-        db.flush()
-        
-        # Link to client record
+        await db.flush()
+
         client.user_id = client_user.id
-        client.email = email  # Update client email if different
-        
-        db.commit()
-        db.refresh(client_user)
-        db.refresh(client)
-        
+        client.email = email
+
+        await db.commit()
+        await db.refresh(client_user)
+        await db.refresh(client)
+
         return client_user, temp_password

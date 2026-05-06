@@ -1,15 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
 from datetime import date
 from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.utils.deps import get_current_trainer, get_current_user
-from app.models.user import User
-from app.models.client import Client
 from app.models.body_metric import BodyMetric
+from app.models.client import Client
+from app.models.user import User
+from app.utils.deps import get_current_trainer, get_current_user
 
 router = APIRouter()
 
@@ -62,10 +63,11 @@ class BodyMetricResponse(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def verify_client(client_id: int, trainer_id: int, db: Session) -> Client:
-    client = db.query(Client).filter(
+async def _verify_client(client_id: int, trainer_id: int, db: AsyncSession) -> Client:
+    stmt = select(Client).where(
         and_(Client.id == client_id, Client.trainer_id == trainer_id)
-    ).first()
+    )
+    client = (await db.execute(stmt)).scalar_one_or_none()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client
@@ -73,88 +75,102 @@ def verify_client(client_id: int, trainer_id: int, db: Session) -> Client:
 
 # ── Trainer endpoints ─────────────────────────────────────────────────────────
 
-@router.get("/clients/{client_id}/body-metrics", response_model=List[BodyMetricResponse])
-def get_body_metrics(
+@router.get(
+    "/clients/{client_id}/body-metrics", response_model=List[BodyMetricResponse]
+)
+async def get_body_metrics(
     client_id: int,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    verify_client(client_id, current_user.id, db)
-    return (
-        db.query(BodyMetric)
-        .filter(BodyMetric.client_id == client_id)
+    await _verify_client(client_id, current_user.id, db)
+    stmt = (
+        select(BodyMetric)
+        .where(BodyMetric.client_id == client_id)
         .order_by(BodyMetric.measured_at.asc())
-        .all()
     )
+    return list((await db.execute(stmt)).scalars().all())
 
 
-@router.post("/clients/{client_id}/body-metrics", response_model=BodyMetricResponse, status_code=201)
-def create_body_metric(
+@router.post(
+    "/clients/{client_id}/body-metrics",
+    response_model=BodyMetricResponse,
+    status_code=201,
+)
+async def create_body_metric(
     client_id: int,
     data: BodyMetricCreate,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    verify_client(client_id, current_user.id, db)
+    await _verify_client(client_id, current_user.id, db)
     metric = BodyMetric(client_id=client_id, **data.dict())
     db.add(metric)
-    db.commit()
-    db.refresh(metric)
+    await db.commit()
+    await db.refresh(metric)
     return metric
 
 
-@router.put("/clients/{client_id}/body-metrics/{metric_id}", response_model=BodyMetricResponse)
-def update_body_metric(
+@router.put(
+    "/clients/{client_id}/body-metrics/{metric_id}", response_model=BodyMetricResponse
+)
+async def update_body_metric(
     client_id: int,
     metric_id: int,
     data: BodyMetricUpdate,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    verify_client(client_id, current_user.id, db)
-    metric = db.query(BodyMetric).filter(
+    await _verify_client(client_id, current_user.id, db)
+    stmt = select(BodyMetric).where(
         and_(BodyMetric.id == metric_id, BodyMetric.client_id == client_id)
-    ).first()
+    )
+    metric = (await db.execute(stmt)).scalar_one_or_none()
     if not metric:
         raise HTTPException(status_code=404, detail="Metric not found")
     for field, value in data.dict(exclude_unset=True).items():
         setattr(metric, field, value)
-    db.commit()
-    db.refresh(metric)
+    await db.commit()
+    await db.refresh(metric)
     return metric
 
 
-@router.delete("/clients/{client_id}/body-metrics/{metric_id}", status_code=204)
-def delete_body_metric(
+@router.delete(
+    "/clients/{client_id}/body-metrics/{metric_id}", status_code=204
+)
+async def delete_body_metric(
     client_id: int,
     metric_id: int,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    verify_client(client_id, current_user.id, db)
-    metric = db.query(BodyMetric).filter(
+    await _verify_client(client_id, current_user.id, db)
+    stmt = select(BodyMetric).where(
         and_(BodyMetric.id == metric_id, BodyMetric.client_id == client_id)
-    ).first()
+    )
+    metric = (await db.execute(stmt)).scalar_one_or_none()
     if not metric:
         raise HTTPException(status_code=404, detail="Metric not found")
-    db.delete(metric)
-    db.commit()
+    await db.delete(metric)
+    await db.commit()
 
 
 # ── Client self-view ──────────────────────────────────────────────────────────
 
 @router.get("/my/body-metrics", response_model=List[BodyMetricResponse])
-def get_my_body_metrics(
+async def get_my_body_metrics(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Client can view their own body metric history."""
-    client = db.query(Client).filter(Client.user_id == current_user.id).first()
+    client = (
+        await db.execute(select(Client).where(Client.user_id == current_user.id))
+    ).scalar_one_or_none()
     if not client:
         return []
-    return (
-        db.query(BodyMetric)
-        .filter(BodyMetric.client_id == client.id)
+    stmt = (
+        select(BodyMetric)
+        .where(BodyMetric.client_id == client.id)
         .order_by(BodyMetric.measured_at.asc())
-        .all()
     )
+    return list((await db.execute(stmt)).scalars().all())

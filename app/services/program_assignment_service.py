@@ -1,61 +1,72 @@
-from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
-from datetime import datetime, timedelta
 import logging
+from typing import Any, Dict, List, Optional
 
-from app.models.program_assignment import ProgramAssignment, AssignmentStatus
-from app.models.program import Program, Exercise
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.client import Client
+from app.models.program import Exercise, Program
+from app.models.program_assignment import AssignmentStatus, ProgramAssignment
 from app.schemas.program_assignment import (
-    ProgramAssignmentCreate, 
-    ProgramAssignmentUpdate,
     BulkAssignmentCreate,
-    ProgressUpdate
+    ProgramAssignmentCreate,
+    ProgramAssignmentUpdate,
+    ProgressUpdate,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class ProgramAssignmentService:
-    
     @staticmethod
-    def create_assignment(
-        db: Session,
+    async def create_assignment(
+        db: AsyncSession,
         assignment_data: ProgramAssignmentCreate,
-        trainer_id: int
+        trainer_id: int,
     ) -> ProgramAssignment:
-        """Create a new program assignment"""
-        
-        # Verify program belongs to trainer
-        program = db.query(Program).filter(
-            and_(Program.id == assignment_data.program_id, Program.trainer_id == trainer_id)
-        ).first()
+        program = (
+            await db.execute(
+                select(Program).where(
+                    and_(
+                        Program.id == assignment_data.program_id,
+                        Program.trainer_id == trainer_id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
         if not program:
             raise ValueError("Program not found or access denied")
-        
-        # Verify client belongs to trainer  
-        client = db.query(Client).filter(
-            and_(Client.id == assignment_data.client_id, Client.trainer_id == trainer_id)
-        ).first()
+
+        client = (
+            await db.execute(
+                select(Client).where(
+                    and_(
+                        Client.id == assignment_data.client_id,
+                        Client.trainer_id == trainer_id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
         if not client:
             raise ValueError("Client not found or access denied")
-        
-        # Check for existing active assignment
-        existing = db.query(ProgramAssignment).filter(
-            and_(
-                ProgramAssignment.client_id == assignment_data.client_id,
-                ProgramAssignment.status == AssignmentStatus.ACTIVE
+
+        existing = (
+            await db.execute(
+                select(ProgramAssignment).where(
+                    and_(
+                        ProgramAssignment.client_id == assignment_data.client_id,
+                        ProgramAssignment.status == AssignmentStatus.ACTIVE,
+                    )
+                )
             )
-        ).first()
+        ).scalar_one_or_none()
         if existing:
             raise ValueError("Client already has an active program assignment")
-        
-        # Calculate total sessions if program has duration
+
         total_sessions = None
         if program.duration_weeks and program.sessions_per_week:
-            total_sessions = program.duration_weeks * program.sessions_per_week        
-        # Create the assignment
+            total_sessions = program.duration_weeks * program.sessions_per_week
+
         assignment = ProgramAssignment(
             program_id=assignment_data.program_id,
             client_id=assignment_data.client_id,
@@ -64,264 +75,249 @@ class ProgramAssignmentService:
             end_date=assignment_data.end_date,
             custom_notes=assignment_data.custom_notes,
             trainer_notes=assignment_data.trainer_notes,
-            total_sessions=total_sessions
+            total_sessions=total_sessions,
         )
-        
         db.add(assignment)
-        db.commit()
-        db.refresh(assignment)
-        
-        # Generate weekly exercise assignments
+        await db.commit()
+        await db.refresh(assignment)
+
         try:
             from app.services.weekly_exercise_service import WeeklyExerciseService
-            WeeklyExerciseService.generate_weekly_exercises_from_assignment(db, assignment)
+
+            await WeeklyExerciseService.generate_weekly_exercises_from_assignment(
+                db, assignment
+            )
         except Exception as e:
-            logger.warning(f"Failed to generate weekly exercises for assignment {assignment.id}: {e}")
-        
+            logger.warning(
+                f"Failed to generate weekly exercises for assignment {assignment.id}: {e}"
+            )
+
         return assignment
-    
+
     @staticmethod
-    def get_assignments(
-        db: Session,
+    async def get_assignments(
+        db: AsyncSession,
         trainer_id: int,
         skip: int = 0,
         limit: int = 100,
         client_id: Optional[int] = None,
-        status: Optional[AssignmentStatus] = None
+        status: Optional[AssignmentStatus] = None,
     ) -> List[ProgramAssignment]:
-        """Get assignments for a trainer with optional filters"""
-        
-        query = db.query(ProgramAssignment).filter(
+        stmt = select(ProgramAssignment).where(
             ProgramAssignment.trainer_id == trainer_id
         )
-        
         if client_id:
-            query = query.filter(ProgramAssignment.client_id == client_id)
-        
+            stmt = stmt.where(ProgramAssignment.client_id == client_id)
         if status:
-            query = query.filter(ProgramAssignment.status == status)
-        
-        return query.offset(skip).limit(limit).all()
-    
+            stmt = stmt.where(ProgramAssignment.status == status)
+
+        result = await db.execute(stmt.offset(skip).limit(limit))
+        return list(result.scalars().all())
+
     @staticmethod
-    def get_assignment(
-        db: Session,
-        assignment_id: int,
-        trainer_id: int
+    async def get_assignment(
+        db: AsyncSession, assignment_id: int, trainer_id: int
     ) -> Optional[ProgramAssignment]:
-        """Get a specific assignment by ID"""        
-        return db.query(ProgramAssignment).filter(
+        stmt = select(ProgramAssignment).where(
             and_(
                 ProgramAssignment.id == assignment_id,
-                ProgramAssignment.trainer_id == trainer_id
+                ProgramAssignment.trainer_id == trainer_id,
             )
-        ).first()
-    
+        )
+        return (await db.execute(stmt)).scalar_one_or_none()
+
     @staticmethod
-    def update_assignment(
-        db: Session,
+    async def update_assignment(
+        db: AsyncSession,
         assignment_id: int,
         assignment_update: ProgramAssignmentUpdate,
-        trainer_id: int
+        trainer_id: int,
     ) -> Optional[ProgramAssignment]:
-        """Update an existing assignment"""
-        
-        assignment = ProgramAssignmentService.get_assignment(db, assignment_id, trainer_id)
+        assignment = await ProgramAssignmentService.get_assignment(
+            db, assignment_id, trainer_id
+        )
         if not assignment:
             return None
-        
-        # Update fields
-        update_data = assignment_update.dict(exclude_unset=True)
-        for field, value in update_data.items():
+        for field, value in assignment_update.dict(exclude_unset=True).items():
             setattr(assignment, field, value)
-        
-        db.commit()
-        db.refresh(assignment)
+        await db.commit()
+        await db.refresh(assignment)
         return assignment
-    
+
     @staticmethod
-    def update_progress(
-        db: Session,
+    async def update_progress(
+        db: AsyncSession,
         assignment_id: int,
         progress_update: ProgressUpdate,
-        trainer_id: int
+        trainer_id: int,
     ) -> Optional[ProgramAssignment]:
-        """Update assignment progress"""
-        
-        assignment = ProgramAssignmentService.get_assignment(db, assignment_id, trainer_id)
+        assignment = await ProgramAssignmentService.get_assignment(
+            db, assignment_id, trainer_id
+        )
         if not assignment:
-            return None        
+            return None
         assignment.sessions_completed = progress_update.sessions_completed
         assignment.completion_percentage = progress_update.completion_percentage
-        
         if progress_update.notes:
             assignment.trainer_notes = progress_update.notes
-        
-        # Auto-complete if 100%
         if progress_update.completion_percentage >= 100:
             assignment.status = AssignmentStatus.COMPLETED
-        
-        db.commit()
-        db.refresh(assignment)
+        await db.commit()
+        await db.refresh(assignment)
         return assignment
-    
+
     @staticmethod
-    def cancel_assignment(
-        db: Session,
-        assignment_id: int,
-        trainer_id: int
+    async def cancel_assignment(
+        db: AsyncSession, assignment_id: int, trainer_id: int
     ) -> bool:
-        """Cancel an assignment"""
-        
-        assignment = ProgramAssignmentService.get_assignment(db, assignment_id, trainer_id)
+        assignment = await ProgramAssignmentService.get_assignment(
+            db, assignment_id, trainer_id
+        )
         if not assignment:
             return False
-        
         assignment.status = AssignmentStatus.CANCELLED
-        db.commit()
+        await db.commit()
         return True
-    
+
     @staticmethod
-    def bulk_assign(
-        db: Session,
+    async def bulk_assign(
+        db: AsyncSession,
         bulk_data: BulkAssignmentCreate,
-        trainer_id: int
+        trainer_id: int,
     ) -> List[ProgramAssignment]:
-        """Assign a program to multiple clients"""
-        
-        # Verify program belongs to trainer
-        program = db.query(Program).filter(
-            and_(Program.id == bulk_data.program_id, Program.trainer_id == trainer_id)
-        ).first()
+        program = (
+            await db.execute(
+                select(Program).where(
+                    and_(Program.id == bulk_data.program_id, Program.trainer_id == trainer_id)
+                )
+            )
+        ).scalar_one_or_none()
         if not program:
             raise ValueError("Program not found or access denied")
-        
-        assignments = []
-        errors = []
-        
+
+        assignments: List[ProgramAssignment] = []
+        errors: List[str] = []
+
         for client_id in bulk_data.client_ids:
             try:
-                # Verify client belongs to trainer
-                client = db.query(Client).filter(
-                    and_(Client.id == client_id, Client.trainer_id == trainer_id)
-                ).first()
+                client = (
+                    await db.execute(
+                        select(Client).where(
+                            and_(Client.id == client_id, Client.trainer_id == trainer_id)
+                        )
+                    )
+                ).scalar_one_or_none()
                 if not client:
                     errors.append(f"Client {client_id} not found or access denied")
                     continue
-                
-                # Check for existing active assignment
-                existing = db.query(ProgramAssignment).filter(
-                    and_(
-                        ProgramAssignment.client_id == client_id,
-                        ProgramAssignment.status == AssignmentStatus.ACTIVE
+
+                existing = (
+                    await db.execute(
+                        select(ProgramAssignment).where(
+                            and_(
+                                ProgramAssignment.client_id == client_id,
+                                ProgramAssignment.status == AssignmentStatus.ACTIVE,
+                            )
+                        )
                     )
-                ).first()
+                ).scalar_one_or_none()
                 if existing:
-                    errors.append(f"Client {client.first_name} {client.last_name} already has an active program assignment")
+                    errors.append(
+                        f"Client {client.first_name} {client.last_name} already has an active program assignment"
+                    )
                     continue
-                
-                # Calculate total sessions
+
                 total_sessions = None
                 if program.duration_weeks and program.sessions_per_week:
                     total_sessions = program.duration_weeks * program.sessions_per_week
-                
+
                 assignment = ProgramAssignment(
                     program_id=bulk_data.program_id,
                     client_id=client_id,
                     trainer_id=trainer_id,
                     start_date=bulk_data.start_date,
                     custom_notes=bulk_data.custom_notes,
-                    total_sessions=total_sessions
+                    total_sessions=total_sessions,
                 )
-                
                 db.add(assignment)
-                db.flush()  # Ensure assignment gets an ID
-                
-                # Generate weekly exercise assignments
+                await db.flush()
+
                 try:
                     from app.services.weekly_exercise_service import WeeklyExerciseService
-                    WeeklyExerciseService.generate_weekly_exercises_from_assignment(db, assignment)
+
+                    await WeeklyExerciseService.generate_weekly_exercises_from_assignment(
+                        db, assignment
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to generate weekly exercises for assignment {assignment.id}: {e}")
-                
+                    logger.warning(
+                        f"Failed to generate weekly exercises for assignment {assignment.id}: {e}"
+                    )
+
                 assignments.append(assignment)
-                
             except Exception as e:
-                errors.append(f"Error assigning to client {client_id}: {str(e)}")
+                errors.append(f"Error assigning to client {client_id}: {e}")
                 continue
-        
+
         if assignments:
             try:
-                db.commit()
-                # Refresh all assignments to get the generated IDs and computed fields
+                await db.commit()
                 for assignment in assignments:
-                    db.refresh(assignment)
+                    await db.refresh(assignment)
             except Exception as e:
-                db.rollback()
-                raise ValueError(f"Failed to save assignments: {str(e)}")
-        
-        # If no assignments were created but there were errors, raise an error
+                await db.rollback()
+                raise ValueError(f"Failed to save assignments: {e}")
+
         if not assignments and errors:
             raise ValueError(f"No assignments created. Errors: {'; '.join(errors)}")
-        
+
         return assignments
-    
+
     @staticmethod
-    def get_client_active_assignment(
-        db: Session,
-        client_id: int,
-        trainer_id: int
+    async def get_client_active_assignment(
+        db: AsyncSession, client_id: int, trainer_id: int
     ) -> Optional[ProgramAssignment]:
-        """Get client's active program assignment"""
-        return db.query(ProgramAssignment).filter(
+        stmt = select(ProgramAssignment).where(
             and_(
                 ProgramAssignment.client_id == client_id,
                 ProgramAssignment.trainer_id == trainer_id,
-                ProgramAssignment.status == AssignmentStatus.ACTIVE
+                ProgramAssignment.status == AssignmentStatus.ACTIVE,
             )
-        ).first()
+        )
+        return (await db.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
-    def enhance_workout_structure_with_exercise_names(
-        db: Session,
-        workout_structure: List[Dict[str, Any]]
+    async def enhance_workout_structure_with_exercise_names(
+        db: AsyncSession, workout_structure: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Enhance workout structure by adding exercise names to exercises"""
         if not workout_structure:
             return workout_structure
-        
-        # Collect all exercise IDs
-        exercise_ids = set()
+
+        exercise_ids: set[int] = set()
         for day in workout_structure:
-            if 'exercises' in day:
-                for exercise in day['exercises']:
-                    if 'exercise_id' in exercise:
-                        exercise_ids.add(exercise['exercise_id'])
-        
-        # Fetch exercise names in bulk
+            for exercise in day.get("exercises", []):
+                if "exercise_id" in exercise:
+                    exercise_ids.add(exercise["exercise_id"])
+
         if exercise_ids:
-            exercises = db.query(Exercise.id, Exercise.name).filter(
-                Exercise.id.in_(exercise_ids)
-            ).all()
-            exercise_name_map = {ex.id: ex.name for ex in exercises}
+            stmt = select(Exercise.id, Exercise.name).where(Exercise.id.in_(exercise_ids))
+            rows = (await db.execute(stmt)).all()
+            exercise_name_map = {row.id: row.name for row in rows}
         else:
             exercise_name_map = {}
-        
-        # Enhance the structure with exercise names
-        enhanced_structure = []
+
+        enhanced_structure: List[Dict[str, Any]] = []
         for day in workout_structure:
             enhanced_day = day.copy()
-            if 'exercises' in enhanced_day:
+            if "exercises" in enhanced_day:
                 enhanced_exercises = []
-                for exercise in enhanced_day['exercises']:
+                for exercise in enhanced_day["exercises"]:
                     enhanced_exercise = exercise.copy()
-                    if 'exercise_id' in enhanced_exercise:
-                        exercise_id = enhanced_exercise['exercise_id']
-                        enhanced_exercise['exercise_name'] = exercise_name_map.get(
-                            exercise_id, f'Exercise {exercise_id}'
+                    if "exercise_id" in enhanced_exercise:
+                        eid = enhanced_exercise["exercise_id"]
+                        enhanced_exercise["exercise_name"] = exercise_name_map.get(
+                            eid, f"Exercise {eid}"
                         )
                     enhanced_exercises.append(enhanced_exercise)
-                enhanced_day['exercises'] = enhanced_exercises
+                enhanced_day["exercises"] = enhanced_exercises
             enhanced_structure.append(enhanced_day)
-        
         return enhanced_structure

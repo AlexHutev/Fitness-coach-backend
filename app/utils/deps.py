@@ -1,78 +1,57 @@
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
 from app.core.security import verify_token
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.user import TokenData
 
-# HTTP Bearer token scheme
 security = HTTPBearer()
 
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Get current authenticated user from JWT token"""
-    
+    """Resolve the authenticated user from the bearer access token."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
-    try:
-        # Verify and decode token
-        email = verify_token(credentials.credentials)
-        if email is None:
-            raise credentials_exception
-        
-        token_data = TokenData(email=email)
-    except Exception:
+
+    payload = verify_token(credentials.credentials, expected_type="access")
+    if payload is None or payload.get("sub") is None:
         raise credentials_exception
-    
-    # Get user from database
-    user = db.query(User).filter(User.email == token_data.email).first()
+
+    token_data = TokenData(email=payload["sub"])
+
+    result = await db.execute(select(User).where(User.email == token_data.email))
+    user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
-    
     return user
 
 
-async def get_current_active_user(
-    current_user: User = Depends(get_current_user)
-) -> User:
-    """Get current active user (must be active)"""
+async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
+    return current_user
+
+
+async def get_current_trainer(current_user: User = Depends(get_current_active_user)) -> User:
+    if current_user.role not in (UserRole.TRAINER, UserRole.ADMIN):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
         )
     return current_user
 
 
-async def get_current_trainer(
-    current_user: User = Depends(get_current_active_user)
-) -> User:
-    """Get current user if they are a trainer"""
-    from app.models.user import UserRole
-    if current_user.role != UserRole.TRAINER and current_user.role != UserRole.ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    return current_user
-
-
-async def get_current_admin(
-    current_user: User = Depends(get_current_active_user)
-) -> User:
-    """Get current user if they are an admin"""
-    from app.models.user import UserRole
+async def get_current_admin(current_user: User = Depends(get_current_active_user)) -> User:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin permissions required"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin permissions required"
         )
     return current_user

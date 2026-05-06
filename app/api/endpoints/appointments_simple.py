@@ -1,16 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, validator
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.utils.deps import get_current_trainer, get_current_user
-from app.models.user import User, UserRole
-from app.models.schedule import Appointment
 from app.models.client import Client
-
+from app.models.schedule import Appointment
+from app.models.user import User
+from app.utils.deps import get_current_trainer, get_current_user
 
 router = APIRouter()
 
@@ -86,88 +86,105 @@ class StatusUpdate(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def get_appointment_or_404(appointment_id: int, trainer_id: int, db: Session) -> Appointment:
-    appt = db.query(Appointment).filter(
+async def _get_appointment_or_404(
+    appointment_id: int, trainer_id: int, db: AsyncSession
+) -> Appointment:
+    stmt = select(Appointment).where(
         and_(Appointment.id == appointment_id, Appointment.trainer_id == trainer_id)
-    ).first()
+    )
+    appt = (await db.execute(stmt)).scalar_one_or_none()
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
     return appt
 
 
-# ── Static routes FIRST (before any dynamic /{id} routes) ────────────────────
+# ── Static routes (registered before dynamic /{id}) ──────────────────────────
 
 @router.get("/today", response_model=List[AppointmentResponse])
-def get_today_appointments(
+async def get_today_appointments(
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get all appointments for today for the current trainer."""
     today = date.today()
     day_start = datetime(today.year, today.month, today.day, 0, 0, 0)
     day_end = datetime(today.year, today.month, today.day, 23, 59, 59)
-    return (
-        db.query(Appointment)
-        .filter(and_(
-            Appointment.trainer_id == current_user.id,
-            Appointment.start_time >= day_start,
-            Appointment.start_time <= day_end,
-        ))
+    stmt = (
+        select(Appointment)
+        .where(
+            and_(
+                Appointment.trainer_id == current_user.id,
+                Appointment.start_time >= day_start,
+                Appointment.start_time <= day_end,
+            )
+        )
         .order_by(Appointment.start_time.asc())
-        .all()
     )
+    return list((await db.execute(stmt)).scalars().all())
 
 
-# IMPORTANT: /my must be defined BEFORE /{appointment_id} so FastAPI does not
-# treat the literal string "my" as a dynamic integer parameter.
 @router.get("/my", response_model=List[AppointmentResponse])
-def get_my_appointments(
+async def get_my_appointments(
     upcoming_only: bool = False,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Client-facing: returns all appointments for the logged-in client."""
-    client = db.query(Client).filter(Client.user_id == current_user.id).first()
+    """Client-facing: appointments for the logged-in client."""
+    client = (
+        await db.execute(select(Client).where(Client.user_id == current_user.id))
+    ).scalar_one_or_none()
     if not client:
         return []
-    query = db.query(Appointment).filter(Appointment.client_id == client.id)
+    stmt = select(Appointment).where(Appointment.client_id == client.id)
     if upcoming_only:
-        query = query.filter(Appointment.start_time >= datetime.utcnow())
-    return query.order_by(Appointment.start_time.asc()).all()
+        stmt = stmt.where(Appointment.start_time >= datetime.utcnow())
+    stmt = stmt.order_by(Appointment.start_time.asc())
+    return list((await db.execute(stmt)).scalars().all())
 
 
 @router.get("/", response_model=List[AppointmentResponse])
-def list_appointments(
+async def list_appointments(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     status: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    query = db.query(Appointment).filter(Appointment.trainer_id == current_user.id)
+    stmt = select(Appointment).where(Appointment.trainer_id == current_user.id)
     if date_from:
-        query = query.filter(Appointment.start_time >= date_from)
+        stmt = stmt.where(Appointment.start_time >= date_from)
     if date_to:
-        query = query.filter(Appointment.start_time <= date_to)
+        stmt = stmt.where(Appointment.start_time <= date_to)
     if status:
-        query = query.filter(Appointment.status == status)
-    return query.order_by(Appointment.start_time.asc()).offset(skip).limit(limit).all()
+        stmt = stmt.where(Appointment.status == status)
+    stmt = stmt.order_by(Appointment.start_time.asc()).offset(skip).limit(limit)
+    return list((await db.execute(stmt)).scalars().all())
 
 
 @router.post("/", response_model=AppointmentResponse, status_code=201)
-def create_appointment(
+async def create_appointment(
     data: AppointmentCreate,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    client = db.query(Client).filter(
-        and_(Client.id == data.client_id, Client.trainer_id == current_user.id)
-    ).first()
+    client = (
+        await db.execute(
+            select(Client).where(
+                and_(Client.id == data.client_id, Client.trainer_id == current_user.id)
+            )
+        )
+    ).scalar_one_or_none()
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found or does not belong to you")
-    title = data.title.strip() if data.title.strip() else f"{data.appointment_type} - {client.first_name} {client.last_name}"
+        raise HTTPException(
+            status_code=404, detail="Client not found or does not belong to you"
+        )
+
+    title = (
+        data.title.strip()
+        if data.title.strip()
+        else f"{data.appointment_type} - {client.first_name} {client.last_name}"
+    )
     appt = Appointment(
         trainer_id=current_user.id,
         client_id=data.client_id,
@@ -182,59 +199,59 @@ def create_appointment(
         notes=data.notes,
     )
     db.add(appt)
-    db.commit()
-    db.refresh(appt)
+    await db.commit()
+    await db.refresh(appt)
     return appt
 
 
-# ── Dynamic /{appointment_id} routes (AFTER all static routes) ───────────────
+# ── Dynamic /{appointment_id} routes ─────────────────────────────────────────
 
 @router.get("/{appointment_id}", response_model=AppointmentResponse)
-def get_appointment(
+async def get_appointment(
     appointment_id: int,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    return get_appointment_or_404(appointment_id, current_user.id, db)
+    return await _get_appointment_or_404(appointment_id, current_user.id, db)
 
 
 @router.put("/{appointment_id}", response_model=AppointmentResponse)
-def update_appointment(
+async def update_appointment(
     appointment_id: int,
     data: AppointmentUpdate,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    appt = get_appointment_or_404(appointment_id, current_user.id, db)
+    appt = await _get_appointment_or_404(appointment_id, current_user.id, db)
     for field, value in data.dict(exclude_unset=True).items():
         setattr(appt, field, value)
     appt.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(appt)
+    await db.commit()
+    await db.refresh(appt)
     return appt
 
 
 @router.patch("/{appointment_id}/status", response_model=AppointmentResponse)
-def update_status(
+async def update_status(
     appointment_id: int,
     data: StatusUpdate,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    appt = get_appointment_or_404(appointment_id, current_user.id, db)
+    appt = await _get_appointment_or_404(appointment_id, current_user.id, db)
     appt.status = data.status
     appt.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(appt)
+    await db.commit()
+    await db.refresh(appt)
     return appt
 
 
 @router.delete("/{appointment_id}", status_code=204)
-def delete_appointment(
+async def delete_appointment(
     appointment_id: int,
     current_user: User = Depends(get_current_trainer),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    appt = get_appointment_or_404(appointment_id, current_user.id, db)
-    db.delete(appt)
-    db.commit()
+    appt = await _get_appointment_or_404(appointment_id, current_user.id, db)
+    await db.delete(appt)
+    await db.commit()

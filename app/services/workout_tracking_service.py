@@ -1,31 +1,33 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
 
-from app.models import WorkoutLog, ExerciseLog, ProgramAssignment, Client
-from app.models.notification import NotificationType
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models import Client, ExerciseLog, ProgramAssignment, WorkoutLog
 from app.schemas.client_schemas import (
-    WorkoutLogCreate, WorkoutLogResponse, ExerciseLogResponse,
-    ExerciseLogCreate, ExerciseSetData
+    ExerciseLogResponse,
+    WorkoutLogCreate,
+    WorkoutLogResponse,
 )
 
 
 class WorkoutTrackingService:
-    
-    def create_workout_log(self, db: Session, workout_data: WorkoutLogCreate, client_id: int) -> Optional[WorkoutLogResponse]:
-        """Create a new workout log with exercise logs"""
-        
-        # Verify assignment belongs to client
-        assignment = db.query(ProgramAssignment).filter(
-            ProgramAssignment.id == workout_data.assignment_id,
-            ProgramAssignment.client_id == client_id
-        ).first()
-        
+    async def create_workout_log(
+        self, db: AsyncSession, workout_data: WorkoutLogCreate, client_id: int
+    ) -> Optional[WorkoutLogResponse]:
+        assignment = (
+            await db.execute(
+                select(ProgramAssignment).where(
+                    ProgramAssignment.id == workout_data.assignment_id,
+                    ProgramAssignment.client_id == client_id,
+                )
+            )
+        ).scalar_one_or_none()
         if not assignment:
             return None
-        
-        # Create workout log
+
         workout_log = WorkoutLog(
             assignment_id=workout_data.assignment_id,
             client_id=client_id,
@@ -37,14 +39,12 @@ class WorkoutTrackingService:
             client_notes=workout_data.client_notes,
             is_completed=workout_data.is_completed,
             is_skipped=workout_data.is_skipped,
-            skip_reason=workout_data.skip_reason
+            skip_reason=workout_data.skip_reason,
         )
-        
         db.add(workout_log)
-        db.flush()  # Get the ID without committing
-        
-        # Create exercise logs
-        exercise_logs = []
+        await db.flush()
+
+        exercise_logs: List[ExerciseLog] = []
         for exercise_data in workout_data.exercises:
             exercise_log = ExerciseLog(
                 workout_log_id=workout_log.id,
@@ -58,146 +58,130 @@ class WorkoutTrackingService:
                 actual_sets=[set_data.dict() for set_data in exercise_data.actual_sets],
                 difficulty_rating=exercise_data.difficulty_rating,
                 exercise_notes=exercise_data.exercise_notes,
-                form_rating=exercise_data.form_rating
+                form_rating=exercise_data.form_rating,
             )
             db.add(exercise_log)
             exercise_logs.append(exercise_log)
-        
-        # Update assignment progress
+
         if workout_data.is_completed:
             assignment.completed_workouts += 1
             assignment.last_workout_date = workout_log.workout_date
-            
-            # Send notification to trainer
-            self._notify_trainer_workout_completed(db, assignment, workout_log)
-        
-        db.commit()
-        db.refresh(workout_log)
-        
-        # Return formatted response
+            await self._notify_trainer_workout_completed(db, assignment, workout_log)
+
+        await db.commit()
+        await db.refresh(workout_log)
         return self._format_workout_response(workout_log, exercise_logs)
-    
-    def get_workout_log(self, db: Session, workout_id: int, client_id: int) -> Optional[WorkoutLogResponse]:
-        """Get a specific workout log"""
-        workout_log = (
-            db.query(WorkoutLog)
-            .filter(WorkoutLog.id == workout_id, WorkoutLog.client_id == client_id)
-            .options(joinedload(WorkoutLog.exercise_logs))
-            .first()
+
+    async def get_workout_log(
+        self, db: AsyncSession, workout_id: int, client_id: int
+    ) -> Optional[WorkoutLogResponse]:
+        stmt = (
+            select(WorkoutLog)
+            .options(selectinload(WorkoutLog.exercise_logs))
+            .where(WorkoutLog.id == workout_id, WorkoutLog.client_id == client_id)
         )
-        
+        workout_log = (await db.execute(stmt)).scalar_one_or_none()
         if not workout_log:
             return None
-        
         return self._format_workout_response(workout_log, workout_log.exercise_logs)
-    
-    def get_workout_logs_for_assignment(
-        self, 
-        db: Session, 
-        assignment_id: int, 
+
+    async def get_workout_logs_for_assignment(
+        self,
+        db: AsyncSession,
+        assignment_id: int,
         client_id: int,
-        limit: int = 50
+        limit: int = 50,
     ) -> List[WorkoutLogResponse]:
-        """Get all workout logs for a specific assignment"""
-        
-        # Verify assignment belongs to client
-        assignment = db.query(ProgramAssignment).filter(
-            ProgramAssignment.id == assignment_id,
-            ProgramAssignment.client_id == client_id
-        ).first()
-        
+        assignment = (
+            await db.execute(
+                select(ProgramAssignment).where(
+                    ProgramAssignment.id == assignment_id,
+                    ProgramAssignment.client_id == client_id,
+                )
+            )
+        ).scalar_one_or_none()
         if not assignment:
             return []
-        
-        workout_logs = (
-            db.query(WorkoutLog)
-            .filter(WorkoutLog.assignment_id == assignment_id)
-            .options(joinedload(WorkoutLog.exercise_logs))
+
+        stmt = (
+            select(WorkoutLog)
+            .options(selectinload(WorkoutLog.exercise_logs))
+            .where(WorkoutLog.assignment_id == assignment_id)
             .order_by(WorkoutLog.workout_date.desc())
             .limit(limit)
-            .all()
         )
-        
-        return [
-            self._format_workout_response(log, log.exercise_logs)
-            for log in workout_logs
-        ]
-    
-    def update_workout_log(
-        self, 
-        db: Session, 
-        workout_id: int, 
+        workout_logs = list((await db.execute(stmt)).scalars().all())
+        return [self._format_workout_response(log, log.exercise_logs) for log in workout_logs]
+
+    async def update_workout_log(
+        self,
+        db: AsyncSession,
+        workout_id: int,
         client_id: int,
-        update_data: dict
+        update_data: dict,
     ) -> Optional[WorkoutLogResponse]:
-        """Update an existing workout log"""
-        
         workout_log = (
-            db.query(WorkoutLog)
-            .filter(WorkoutLog.id == workout_id, WorkoutLog.client_id == client_id)
-            .first()
-        )
-        
+            await db.execute(
+                select(WorkoutLog).where(
+                    WorkoutLog.id == workout_id,
+                    WorkoutLog.client_id == client_id,
+                )
+            )
+        ).scalar_one_or_none()
         if not workout_log:
             return None
-        
-        # Update allowed fields
-        allowed_fields = [
-            'total_duration_minutes', 'perceived_exertion', 'client_notes', 
-            'is_completed', 'is_skipped', 'skip_reason'
-        ]
-        
+
+        allowed_fields = {
+            "total_duration_minutes",
+            "perceived_exertion",
+            "client_notes",
+            "is_completed",
+            "is_skipped",
+            "skip_reason",
+        }
         for field, value in update_data.items():
             if field in allowed_fields and hasattr(workout_log, field):
                 setattr(workout_log, field, value)
-        
-        db.commit()
-        db.refresh(workout_log)
-        
-        # Get updated workout with exercise logs
-        workout_log = (
-            db.query(WorkoutLog)
-            .filter(WorkoutLog.id == workout_id)
-            .options(joinedload(WorkoutLog.exercise_logs))
-            .first()
+
+        await db.commit()
+        await db.refresh(workout_log)
+
+        # Reload with exercise logs eagerly
+        stmt = (
+            select(WorkoutLog)
+            .options(selectinload(WorkoutLog.exercise_logs))
+            .where(WorkoutLog.id == workout_id)
         )
-        
+        workout_log = (await db.execute(stmt)).scalar_one()
         return self._format_workout_response(workout_log, workout_log.exercise_logs)
-    
-    def update_exercise_log(
+
+    async def update_exercise_log(
         self,
-        db: Session,
+        db: AsyncSession,
         exercise_log_id: int,
         client_id: int,
-        update_data: dict
+        update_data: dict,
     ) -> Optional[ExerciseLogResponse]:
-        """Update an exercise log within a workout"""
-        
-        exercise_log = (
-            db.query(ExerciseLog)
+        stmt = (
+            select(ExerciseLog)
             .join(WorkoutLog)
-            .filter(
+            .where(
                 ExerciseLog.id == exercise_log_id,
-                WorkoutLog.client_id == client_id
+                WorkoutLog.client_id == client_id,
             )
-            .first()
         )
-        
+        exercise_log = (await db.execute(stmt)).scalar_one_or_none()
         if not exercise_log:
             return None
-        
-        # Update allowed fields
-        allowed_fields = [
-            'actual_sets', 'difficulty_rating', 'exercise_notes', 'form_rating'
-        ]
-        
+
+        allowed_fields = {"actual_sets", "difficulty_rating", "exercise_notes", "form_rating"}
         for field, value in update_data.items():
             if field in allowed_fields and hasattr(exercise_log, field):
                 setattr(exercise_log, field, value)
-        
-        db.commit()
-        db.refresh(exercise_log)
-        
+
+        await db.commit()
+        await db.refresh(exercise_log)
+
         return ExerciseLogResponse(
             id=exercise_log.id,
             exercise_name=exercise_log.exercise_name,
@@ -211,55 +195,58 @@ class WorkoutTrackingService:
             difficulty_rating=exercise_log.difficulty_rating,
             exercise_notes=exercise_log.exercise_notes,
             form_rating=exercise_log.form_rating,
-            created_at=exercise_log.created_at
+            created_at=exercise_log.created_at,
         )
-    
-    def get_workout_history_summary(
-        self, 
-        db: Session, 
-        assignment_id: int, 
-        client_id: int
+
+    async def get_workout_history_summary(
+        self, db: AsyncSession, assignment_id: int, client_id: int
     ) -> dict:
-        """Get summary statistics for workout history"""
-        
-        # Verify assignment belongs to client
-        assignment = db.query(ProgramAssignment).filter(
-            ProgramAssignment.id == assignment_id,
-            ProgramAssignment.client_id == client_id
-        ).first()
-        
+        assignment = (
+            await db.execute(
+                select(ProgramAssignment).where(
+                    ProgramAssignment.id == assignment_id,
+                    ProgramAssignment.client_id == client_id,
+                )
+            )
+        ).scalar_one_or_none()
         if not assignment:
             return {}
-        
-        # Get workout statistics
-        workout_stats = (
-            db.query(
-                func.count(WorkoutLog.id).label('total_workouts'),
-                func.count(func.nullif(WorkoutLog.is_completed, False)).label('completed_workouts'),
-                func.count(func.nullif(WorkoutLog.is_skipped, False)).label('skipped_workouts'),
-                func.avg(WorkoutLog.total_duration_minutes).label('avg_duration'),
-                func.avg(WorkoutLog.perceived_exertion).label('avg_exertion')
+
+        stats_stmt = (
+            select(
+                func.count(WorkoutLog.id).label("total_workouts"),
+                func.count(func.nullif(WorkoutLog.is_completed, False)).label(
+                    "completed_workouts"
+                ),
+                func.count(func.nullif(WorkoutLog.is_skipped, False)).label(
+                    "skipped_workouts"
+                ),
+                func.avg(WorkoutLog.total_duration_minutes).label("avg_duration"),
+                func.avg(WorkoutLog.perceived_exertion).label("avg_exertion"),
             )
-            .filter(WorkoutLog.assignment_id == assignment_id)
-            .first()
+            .where(WorkoutLog.assignment_id == assignment_id)
         )
-        
+        row = (await db.execute(stats_stmt)).first()
+        if row is None:
+            return {}
+
+        total_workouts = row.total_workouts or 0
+        completed_workouts = row.completed_workouts or 0
         return {
-            'total_workouts': workout_stats.total_workouts or 0,
-            'completed_workouts': workout_stats.completed_workouts or 0,
-            'skipped_workouts': workout_stats.skipped_workouts or 0,
-            'completion_rate': round(
-                (workout_stats.completed_workouts / workout_stats.total_workouts * 100) 
-                if workout_stats.total_workouts > 0 else 0, 
-                1
+            "total_workouts": total_workouts,
+            "completed_workouts": completed_workouts,
+            "skipped_workouts": row.skipped_workouts or 0,
+            "completion_rate": round(
+                (completed_workouts / total_workouts * 100) if total_workouts > 0 else 0,
+                1,
             ),
-            'average_duration': round(workout_stats.avg_duration, 1) if workout_stats.avg_duration else None,
-            'average_exertion': round(workout_stats.avg_exertion, 1) if workout_stats.avg_exertion else None
+            "average_duration": round(row.avg_duration, 1) if row.avg_duration else None,
+            "average_exertion": round(row.avg_exertion, 1) if row.avg_exertion else None,
         }
-    
-    def _format_workout_response(self, workout_log: WorkoutLog, exercise_logs: List[ExerciseLog]) -> WorkoutLogResponse:
-        """Format workout log and exercise logs into response schema"""
-        
+
+    def _format_workout_response(
+        self, workout_log: WorkoutLog, exercise_logs: List[ExerciseLog]
+    ) -> WorkoutLogResponse:
         exercises = [
             ExerciseLogResponse(
                 id=ex_log.id,
@@ -274,11 +261,11 @@ class WorkoutTrackingService:
                 difficulty_rating=ex_log.difficulty_rating,
                 exercise_notes=ex_log.exercise_notes,
                 form_rating=ex_log.form_rating,
-                created_at=ex_log.created_at
+                created_at=ex_log.created_at,
             )
             for ex_log in sorted(exercise_logs, key=lambda x: x.exercise_order)
         ]
-        
+
         return WorkoutLogResponse(
             id=workout_log.id,
             assignment_id=workout_log.assignment_id,
@@ -294,33 +281,29 @@ class WorkoutTrackingService:
             is_skipped=workout_log.is_skipped,
             skip_reason=workout_log.skip_reason,
             exercises=exercises,
-            created_at=workout_log.created_at
+            created_at=workout_log.created_at,
         )
-    
-    def _notify_trainer_workout_completed(
-        self, 
-        db: Session, 
-        assignment: ProgramAssignment, 
-        workout_log: WorkoutLog
+
+    async def _notify_trainer_workout_completed(
+        self,
+        db: AsyncSession,
+        assignment: ProgramAssignment,
+        workout_log: WorkoutLog,
     ) -> None:
-        """Send notification to trainer when client completes a workout"""
         from app.services.notification_service import NotificationService
-        
-        # Get client info
-        client = db.query(Client).filter(Client.id == assignment.client_id).first()
+
+        client = (
+            await db.execute(select(Client).where(Client.id == assignment.client_id))
+        ).scalar_one_or_none()
         if not client:
             return
-        
-        # Get trainer_id from client
-        trainer_id = client.trainer_id
-        
-        NotificationService.create_workout_completed_notification(
+
+        await NotificationService.create_workout_completed_notification(
             db=db,
-            trainer_id=trainer_id,
+            trainer_id=client.trainer_id,
             client=client,
-            workout_log=workout_log
+            workout_log=workout_log,
         )
 
 
-# Global instance
 workout_tracking_service = WorkoutTrackingService()

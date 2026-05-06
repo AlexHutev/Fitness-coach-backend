@@ -36,6 +36,6 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 
 
 @api_router.get("/health")
-def health_check():
+async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "message": "FitnessCoach API is running"}

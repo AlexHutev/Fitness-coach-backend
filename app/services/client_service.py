@@ -1,122 +1,114 @@
-from sqlalchemy.orm import Session
+from typing import List, Optional
+
 from fastapi import HTTPException, status
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.client import Client
 from app.schemas.client import ClientCreate, ClientUpdate
-from typing import List, Optional
 
 
 class ClientService:
     @staticmethod
-    def create_client(db: Session, client_create: ClientCreate, trainer_id: int) -> Client:
-        """Create a new client for a trainer"""
-        
-        db_client = Client(
-            trainer_id=trainer_id,
-            **client_create.dict()
-        )
-        
-        db.add(db_client)
-        db.commit()
-        db.refresh(db_client)
-        return db_client
-    
-    @staticmethod
-    def get_client_by_id(db: Session, client_id: int, trainer_id: int) -> Optional[Client]:
-        """Get client by ID (only if belongs to trainer)"""
-        return db.query(Client).filter(
-            Client.id == client_id,
-            Client.trainer_id == trainer_id
-        ).first()
-    
-    @staticmethod
-    def get_clients_by_trainer(
-        db: Session, 
-        trainer_id: int, 
-        skip: int = 0, 
-        limit: int = 100,
-        active_only: bool = True
-    ) -> List[Client]:
-        """Get all clients for a trainer"""
-        query = db.query(Client).filter(Client.trainer_id == trainer_id)
-        
-        if active_only:
-            query = query.filter(Client.is_active == True)
-        
-        return query.offset(skip).limit(limit).all()
-    
-    @staticmethod
-    def update_client(
-        db: Session, 
-        client_id: int, 
-        trainer_id: int, 
-        client_update: ClientUpdate
+    async def create_client(
+        db: AsyncSession, client_create: ClientCreate, trainer_id: int
     ) -> Client:
-        """Update client information"""
-        client = db.query(Client).filter(
-            Client.id == client_id,
-            Client.trainer_id == trainer_id
-        ).first()
-        
+        # `custom_password` lives on the schema for account-creation flows but
+        # is not a column on the Client model — exclude before splatting.
+        payload = client_create.dict(exclude={"custom_password"})
+        db_client = Client(trainer_id=trainer_id, **payload)
+        db.add(db_client)
+        await db.commit()
+        await db.refresh(db_client)
+        return db_client
+
+    @staticmethod
+    async def get_client_by_id(
+        db: AsyncSession, client_id: int, trainer_id: int
+    ) -> Optional[Client]:
+        result = await db.execute(
+            select(Client).where(Client.id == client_id, Client.trainer_id == trainer_id)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_clients_by_trainer(
+        db: AsyncSession,
+        trainer_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        active_only: bool = True,
+    ) -> List[Client]:
+        stmt = select(Client).where(Client.trainer_id == trainer_id)
+        if active_only:
+            stmt = stmt.where(Client.is_active.is_(True))
+        result = await db.execute(stmt.offset(skip).limit(limit))
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def update_client(
+        db: AsyncSession,
+        client_id: int,
+        trainer_id: int,
+        client_update: ClientUpdate,
+    ) -> Client:
+        client = await ClientService.get_client_by_id(db, client_id, trainer_id)
         if not client:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Client not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
             )
-        
-        # Update fields
-        update_data = client_update.dict(exclude_unset=True)
-        for field, value in update_data.items():
+
+        for field, value in client_update.dict(exclude_unset=True).items():
             setattr(client, field, value)
-        
-        db.commit()
-        db.refresh(client)
+
+        await db.commit()
+        await db.refresh(client)
         return client
-    
+
     @staticmethod
-    def delete_client(db: Session, client_id: int, trainer_id: int) -> bool:
-        """Soft delete client (mark as inactive)"""
-        client = db.query(Client).filter(
-            Client.id == client_id,
-            Client.trainer_id == trainer_id
-        ).first()
-        
+    async def delete_client(db: AsyncSession, client_id: int, trainer_id: int) -> bool:
+        client = await ClientService.get_client_by_id(db, client_id, trainer_id)
         if not client:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Client not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
             )
-        
+
         client.is_active = False
-        db.commit()
+        await db.commit()
         return True
-    
+
     @staticmethod
-    def search_clients(
-        db: Session, 
-        trainer_id: int, 
+    async def search_clients(
+        db: AsyncSession,
+        trainer_id: int,
         search_term: str,
         skip: int = 0,
-        limit: int = 50
+        limit: int = 50,
     ) -> List[Client]:
-        """Search clients by name or email"""
-        search_pattern = f"%{search_term}%"
-        
-        return db.query(Client).filter(
-            Client.trainer_id == trainer_id,
-            Client.is_active == True,
-            (
-                Client.first_name.ilike(search_pattern) |
-                Client.last_name.ilike(search_pattern) |
-                Client.email.ilike(search_pattern)
+        pattern = f"%{search_term}%"
+        stmt = (
+            select(Client)
+            .where(
+                Client.trainer_id == trainer_id,
+                Client.is_active.is_(True),
+                or_(
+                    Client.first_name.ilike(pattern),
+                    Client.last_name.ilike(pattern),
+                    Client.email.ilike(pattern),
+                ),
             )
-        ).offset(skip).limit(limit).all()
-    
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+
     @staticmethod
-    def get_client_count(db: Session, trainer_id: int, active_only: bool = True) -> int:
-        """Get total client count for a trainer"""
-        query = db.query(Client).filter(Client.trainer_id == trainer_id)
-        
+    async def get_client_count(
+        db: AsyncSession, trainer_id: int, active_only: bool = True
+    ) -> int:
+        stmt = select(func.count()).select_from(Client).where(Client.trainer_id == trainer_id)
         if active_only:
-            query = query.filter(Client.is_active == True)
-        
-        return query.count()
+            stmt = stmt.where(Client.is_active.is_(True))
+        result = await db.execute(stmt)
+        return int(result.scalar_one())

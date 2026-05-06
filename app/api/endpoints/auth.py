@@ -1,138 +1,157 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPBearer
-from sqlalchemy.orm import Session
-from datetime import timedelta
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import func
+
 from app.core.database import get_db
-from app.core.security import create_access_token, verify_password
-from app.core.config import settings
+from app.core.rate_limit import AUTH_RATE_LIMIT, limiter
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    verify_token,
+)
+from app.models.user import User as UserModel
 from app.schemas.user import (
-    UserCreate, User, LoginRequest, Token, 
-    UserUpdate, PasswordChange
+    LoginRequest,
+    PasswordChange,
+    RefreshRequest,
+    Token,
+    User,
+    UserCreate,
+    UserUpdate,
 )
 from app.services.user_service import UserService
 from app.utils.deps import get_current_active_user
-from app.models.user import User as UserModel
 
 router = APIRouter()
-security = HTTPBearer()
+
+
+def _issue_token_pair(email: str) -> Token:
+    return Token(
+        access_token=create_access_token(subject=email),
+        refresh_token=create_refresh_token(subject=email),
+    )
 
 
 @router.post("/register", response_model=User, status_code=status.HTTP_201_CREATED)
-def register(
+@limiter.limit(AUTH_RATE_LIMIT)
+async def register(
+    request: Request,
     user_create: UserCreate,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Register a new user"""
-    user = UserService.create_user(db=db, user_create=user_create)
-    return user
+    """Register a new trainer account."""
+    return await UserService.create_user(db=db, user_create=user_create)
 
 
 @router.post("/login", response_model=Token)
-def login(
+@limiter.limit(AUTH_RATE_LIMIT)
+async def login(
+    request: Request,
     login_data: LoginRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Login user and return access token"""
-    user = UserService.authenticate_user(
-        db=db, 
-        email=login_data.email, 
-        password=login_data.password
+    """Authenticate and issue an access + refresh token pair."""
+    user = await UserService.authenticate_user(
+        db=db, email=login_data.email, password=login_data.password
     )
-    
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
     if not user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
         )
-    
-    # Create access token
-    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
-    access_token = create_access_token(
-        subject=user.email, expires_delta=access_token_expires
-    )
-    
-    # Update last login
-    from sqlalchemy.sql import func
+
     user.last_login = func.now()
-    db.commit()
-    
-    return {
-        "access_token": access_token, 
-        "token_type": "bearer"
-    }
+    await db.commit()
+
+    return _issue_token_pair(user.email)
+
+
+@router.post("/refresh", response_model=Token)
+@limiter.limit(AUTH_RATE_LIMIT)
+async def refresh(
+    request: Request,
+    payload: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Exchange a valid refresh token for a fresh access + refresh pair."""
+    decoded = verify_token(payload.refresh_token, expected_type="refresh")
+    if decoded is None or decoded.get("sub") is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    email = decoded["sub"]
+    user = (
+        await db.execute(select(UserModel).where(UserModel.email == email))
+    ).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer valid"
+        )
+
+    return _issue_token_pair(email)
 
 
 @router.get("/me", response_model=User)
-def get_current_user_info(
-    current_user: UserModel = Depends(get_current_active_user)
+async def get_current_user_info(
+    current_user: UserModel = Depends(get_current_active_user),
 ):
-    """Get current user information"""
     return current_user
 
 
 @router.put("/me", response_model=User)
-def update_current_user(
+async def update_current_user(
     user_update: UserUpdate,
     current_user: UserModel = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Update current user information"""
-    updated_user = UserService.update_user(
-        db=db, 
-        user_id=current_user.id, 
-        user_update=user_update
+    return await UserService.update_user(
+        db=db, user_id=current_user.id, user_update=user_update
     )
-    return updated_user
 
 
 @router.post("/change-password")
-def change_password(
+async def change_password(
     password_change: PasswordChange,
     current_user: UserModel = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Change user password"""
-    success = UserService.change_password(
+    success = await UserService.change_password(
         db=db,
         user_id=current_user.id,
         current_password=password_change.current_password,
-        new_password=password_change.new_password
+        new_password=password_change.new_password,
     )
-    
-    if success:
-        return {"message": "Password changed successfully"}
-    else:
+    if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to change password"
+            detail="Failed to change password",
         )
+    return {"message": "Password changed successfully"}
 
 
 @router.post("/deactivate")
-def deactivate_account(
+async def deactivate_account(
     current_user: UserModel = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Deactivate current user account"""
-    UserService.deactivate_user(db=db, user_id=current_user.id)
+    await UserService.deactivate_user(db=db, user_id=current_user.id)
     return {"message": "Account deactivated successfully"}
 
 
 @router.post("/verify-token")
-def verify_token(
-    current_user: UserModel = Depends(get_current_active_user)
+async def verify_token_endpoint(
+    current_user: UserModel = Depends(get_current_active_user),
 ):
-    """Verify if token is valid"""
     return {
         "valid": True,
         "user_id": current_user.id,
-        "email": current_user.email
+        "email": current_user.email,
     }
-    

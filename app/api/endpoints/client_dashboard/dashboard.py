@@ -1,40 +1,97 @@
+from datetime import date, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 from app.core.database import get_db
+from app.models.client import Client
+from app.models.program_assignment import AssignmentStatus, ProgramAssignment
+from app.models.schedule import Appointment
 from app.models.user import User, UserRole
+from app.models.workout_tracking import WorkoutLog
 from app.services.client_account_service import ClientAccountService
 from app.utils.deps import get_current_user
-from typing import Optional
 
 router = APIRouter()
 
 
-def get_current_client(current_user: User = Depends(get_current_user)) -> User:
-    """Dependency to ensure current user is a client"""
+async def get_current_client(current_user: User = Depends(get_current_user)) -> User:
+    """Restrict to users with the CLIENT role."""
     if current_user.role != UserRole.CLIENT:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Client role required."
+            detail="Access denied. Client role required.",
         )
     return current_user
 
 
+def _calculate_profile_completion(client_record: Client) -> int:
+    total_fields = 9
+    completed = 0
+    if client_record.height:
+        completed += 1
+    if client_record.weight:
+        completed += 1
+    if client_record.body_fat_percentage:
+        completed += 1
+    if client_record.activity_level:
+        completed += 1
+    if client_record.primary_goal:
+        completed += 1
+    if client_record.date_of_birth:
+        completed += 1
+    if client_record.gender:
+        completed += 1
+    if client_record.emergency_contact_name:
+        completed += 1
+    if client_record.emergency_contact_phone:
+        completed += 1
+    return round((completed / total_fields) * 100)
+
+
+def _missing_profile_fields(client_record: Client) -> list:
+    missing = []
+    if not client_record.height:
+        missing.append("height")
+    if not client_record.weight:
+        missing.append("weight")
+    if not client_record.activity_level:
+        missing.append("activity_level")
+    if not client_record.primary_goal:
+        missing.append("primary_goal")
+    if not client_record.date_of_birth:
+        missing.append("date_of_birth")
+    if not client_record.gender:
+        missing.append("gender")
+    if not client_record.emergency_contact_name:
+        missing.append("emergency_contact_name")
+    if not client_record.emergency_contact_phone:
+        missing.append("emergency_contact_phone")
+    return missing
+
+
+async def _client_with_trainer(db: AsyncSession, user_id: int) -> Client | None:
+    stmt = (
+        select(Client)
+        .options(selectinload(Client.trainer))
+        .where(Client.user_id == user_id)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
 @router.get("/profile")
-def get_client_profile(
+async def get_client_profile(
     current_user: User = Depends(get_current_client),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get client's profile information including fitness data"""
-    
-    # Get client record linked to this user account
-    client_record = ClientAccountService.get_client_by_user_id(db, current_user.id)
-    
+    client_record = await _client_with_trainer(db, current_user.id)
     if not client_record:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Client profile not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client profile not found"
         )
-    
+
     return {
         "user_info": {
             "id": current_user.id,
@@ -61,224 +118,187 @@ def get_client_profile(
             "name": f"{client_record.trainer.first_name} {client_record.trainer.last_name}",
             "email": client_record.trainer.email,
             "specialization": client_record.trainer.specialization,
-        }
+        },
     }
 
 
 @router.get("/programs")
-def get_client_programs(
+async def get_client_programs(
     current_user: User = Depends(get_current_client),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get all training programs assigned to this client"""
-    
-    client_record = ClientAccountService.get_client_by_user_id(db, current_user.id)
-    
+    client_record = await ClientAccountService.get_client_by_user_id(db, current_user.id)
     if not client_record:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Client profile not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client profile not found"
         )
-    
-    # Get program assignments for this client
-    from app.models.program_assignment import ProgramAssignment, AssignmentStatus
-    from app.models.program import Program
-    from sqlalchemy.orm import joinedload
-    
-    assignments = db.query(ProgramAssignment).options(
-        joinedload(ProgramAssignment.program),
-        joinedload(ProgramAssignment.trainer)
-    ).filter(
-        ProgramAssignment.client_id == client_record.id,
-        ProgramAssignment.status == AssignmentStatus.ACTIVE
-    ).all()
-    
+
+    stmt = (
+        select(ProgramAssignment)
+        .options(
+            selectinload(ProgramAssignment.program),
+            selectinload(ProgramAssignment.trainer),
+        )
+        .where(
+            ProgramAssignment.client_id == client_record.id,
+            ProgramAssignment.status == AssignmentStatus.ACTIVE,
+        )
+    )
+    assignments = list((await db.execute(stmt)).scalars().all())
+
     assigned_programs = []
     for assignment in assignments:
-        program_data = {
-            "assignment_id": assignment.id,
-            "program_id": assignment.program_id,
-            "program_name": assignment.program.name,
-            "program_description": assignment.program.description,
-            "program_type": assignment.program.program_type,
-            "difficulty_level": assignment.program.difficulty_level,
-            "duration_weeks": assignment.program.duration_weeks,
-            "workout_structure": assignment.program.workout_structure,
-            "assigned_date": assignment.assigned_date.isoformat() if assignment.assigned_date else None,
-            "start_date": assignment.start_date.isoformat() if assignment.start_date else None,
-            "end_date": assignment.end_date.isoformat() if assignment.end_date else None,
-            "status": assignment.status.value,
-            "completion_percentage": assignment.completion_percentage,
-            "sessions_completed": assignment.sessions_completed,
-            "total_sessions": assignment.total_sessions,
-            "custom_notes": assignment.custom_notes,
-            "trainer_notes": assignment.trainer_notes,
-            "trainer_info": {
-                "id": assignment.trainer.id,
-                "name": f"{assignment.trainer.first_name} {assignment.trainer.last_name}",
-                "email": assignment.trainer.email,
-                "specialization": assignment.trainer.specialization
+        assigned_programs.append(
+            {
+                "assignment_id": assignment.id,
+                "program_id": assignment.program_id,
+                "program_name": assignment.program.name,
+                "program_description": assignment.program.description,
+                "program_type": assignment.program.program_type,
+                "difficulty_level": assignment.program.difficulty_level,
+                "duration_weeks": assignment.program.duration_weeks,
+                "workout_structure": assignment.program.workout_structure,
+                "assigned_date": (
+                    assignment.assigned_date.isoformat()
+                    if assignment.assigned_date
+                    else None
+                ),
+                "start_date": (
+                    assignment.start_date.isoformat() if assignment.start_date else None
+                ),
+                "end_date": (
+                    assignment.end_date.isoformat() if assignment.end_date else None
+                ),
+                "status": assignment.status.value,
+                "completion_percentage": assignment.completion_percentage,
+                "sessions_completed": assignment.sessions_completed,
+                "total_sessions": assignment.total_sessions,
+                "custom_notes": assignment.custom_notes,
+                "trainer_notes": assignment.trainer_notes,
+                "trainer_info": {
+                    "id": assignment.trainer.id,
+                    "name": f"{assignment.trainer.first_name} {assignment.trainer.last_name}",
+                    "email": assignment.trainer.email,
+                    "specialization": assignment.trainer.specialization,
+                },
             }
-        }
-        assigned_programs.append(program_data)
-    
+        )
+
     return {
         "assigned_programs": assigned_programs,
-        "total_assignments": len(assigned_programs)
+        "total_assignments": len(assigned_programs),
     }
 
 
 @router.get("/dashboard-stats")
-def get_client_dashboard_stats(
+async def get_client_dashboard_stats(
     current_user: User = Depends(get_current_client),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get dashboard statistics for client"""
-    
-    try:
-        client_record = ClientAccountService.get_client_by_user_id(db, current_user.id)
-        
-        if not client_record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Client profile not found"
-            )
-        
-        # Calculate basic stats
-        bmi = None
-        if client_record.height and client_record.weight:
-            height_m = client_record.height / 100
-            bmi = round(client_record.weight / (height_m ** 2), 1)
-        
-        # Get program statistics
-        from app.models.program_assignment import ProgramAssignment, AssignmentStatus
-        
-        active_programs = db.query(ProgramAssignment).filter(
-            ProgramAssignment.client_id == client_record.id,
-            ProgramAssignment.status == AssignmentStatus.ACTIVE
-        ).count()
-        
-        # Get total completed workouts from WorkoutLog table
-        from app.models.workout_tracking import WorkoutLog
-        try:
-            total_completed_workouts = db.query(WorkoutLog).filter(
-                WorkoutLog.client_id == client_record.id,
-                WorkoutLog.is_completed == True
-            ).count()
-        except:
-            total_completed_workouts = 0
-
-        # Calculate current streak from WorkoutLog dates
-        current_streak = 0
-        try:
-            from datetime import date, timedelta
-            from sqlalchemy import func as sqlfunc
-            # Get distinct workout dates (completed), ordered descending
-            workout_dates = db.query(
-                sqlfunc.date(WorkoutLog.workout_date)
-            ).filter(
-                WorkoutLog.client_id == client_record.id,
-                WorkoutLog.is_completed == True
-            ).distinct().order_by(
-                sqlfunc.date(WorkoutLog.workout_date).desc()
-            ).all()
-
-            if workout_dates:
-                dates = [row[0] for row in workout_dates]
-                # dates[0] is the most recent workout date
-                today = date.today()
-                # Convert to date objects if they are strings
-                def to_date(d):
-                    if isinstance(d, str):
-                        return date.fromisoformat(d)
-                    return d
-                dates = [to_date(d) for d in dates]
-
-                # Streak starts only if the most recent workout was today or yesterday
-                if dates[0] >= today - timedelta(days=1):
-                    streak = 1
-                    for i in range(1, len(dates)):
-                        if dates[i - 1] - dates[i] == timedelta(days=1):
-                            streak += 1
-                        else:
-                            break
-                    current_streak = streak
-        except Exception as e:
-            print(f"Streak calculation error: {e}")
-            current_streak = 0
-
-        return {
-            "profile_completion": {
-                "percentage": calculate_profile_completion(client_record),
-                "missing_fields": get_missing_profile_fields(client_record)
-            },
-            "health_metrics": {
-                "bmi": bmi,
-                "weight": client_record.weight,
-                "body_fat_percentage": client_record.body_fat_percentage,
-            },
-            "program_stats": {
-                "active_programs": active_programs,
-                "completed_workouts": total_completed_workouts,
-                "current_streak": current_streak,
-            }
-        }
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Log the error and return a basic response
-        print(f"Dashboard stats error: {e}")
-        import traceback
-        traceback.print_exc()
+    client_record = await ClientAccountService.get_client_by_user_id(db, current_user.id)
+    if not client_record:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error calculating dashboard stats: {str(e)}"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client profile not found"
         )
 
+    bmi = None
+    if client_record.height and client_record.weight:
+        height_m = client_record.height / 100
+        bmi = round(client_record.weight / (height_m**2), 1)
 
-def calculate_profile_completion(client_record) -> int:
-    """Calculate what percentage of the profile is completed"""
-    total_fields = 9  # Removed phone_number as it's on user record
-    completed_fields = 0
-    
-    if client_record.height: completed_fields += 1
-    if client_record.weight: completed_fields += 1
-    if client_record.body_fat_percentage: completed_fields += 1
-    if client_record.activity_level: completed_fields += 1
-    if client_record.primary_goal: completed_fields += 1
-    if client_record.date_of_birth: completed_fields += 1
-    if client_record.gender: completed_fields += 1
-    if client_record.emergency_contact_name: completed_fields += 1
-    if client_record.emergency_contact_phone: completed_fields += 1
-    
-    return round((completed_fields / total_fields) * 100)
+    active_programs = int(
+        (
+            await db.execute(
+                select(func.count(ProgramAssignment.id)).where(
+                    ProgramAssignment.client_id == client_record.id,
+                    ProgramAssignment.status == AssignmentStatus.ACTIVE,
+                )
+            )
+        ).scalar()
+        or 0
+    )
+
+    total_completed_workouts = int(
+        (
+            await db.execute(
+                select(func.count(WorkoutLog.id)).where(
+                    WorkoutLog.client_id == client_record.id,
+                    WorkoutLog.is_completed.is_(True),
+                )
+            )
+        ).scalar()
+        or 0
+    )
+
+    # Streak calculation: consecutive days with at least one completed workout
+    workout_dates_stmt = (
+        select(func.date(WorkoutLog.workout_date))
+        .where(
+            WorkoutLog.client_id == client_record.id,
+            WorkoutLog.is_completed.is_(True),
+        )
+        .distinct()
+        .order_by(func.date(WorkoutLog.workout_date).desc())
+    )
+    rows = (await db.execute(workout_dates_stmt)).all()
+
+    def _to_date(d):
+        if isinstance(d, str):
+            return date.fromisoformat(d)
+        return d
+
+    current_streak = 0
+    if rows:
+        dates = [_to_date(row[0]) for row in rows if row[0]]
+        if dates and dates[0] >= date.today() - timedelta(days=1):
+            current_streak = 1
+            for i in range(1, len(dates)):
+                if dates[i - 1] - dates[i] == timedelta(days=1):
+                    current_streak += 1
+                else:
+                    break
+
+    return {
+        "profile_completion": {
+            "percentage": _calculate_profile_completion(client_record),
+            "missing_fields": _missing_profile_fields(client_record),
+        },
+        "health_metrics": {
+            "bmi": bmi,
+            "weight": client_record.weight,
+            "body_fat_percentage": client_record.body_fat_percentage,
+        },
+        "program_stats": {
+            "active_programs": active_programs,
+            "completed_workouts": total_completed_workouts,
+            "current_streak": current_streak,
+        },
+    }
 
 
 @router.get("/appointments")
-def get_client_appointments(
+async def get_client_appointments(
     current_user: User = Depends(get_current_client),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get upcoming appointments for this client"""
-    from app.models.schedule import Appointment
-    from datetime import datetime
-
-    client_record = ClientAccountService.get_client_by_user_id(db, current_user.id)
+    client_record = await ClientAccountService.get_client_by_user_id(db, current_user.id)
     if not client_record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client profile not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client profile not found"
+        )
 
-    appointments = (
-        db.query(Appointment)
-        .filter(
+    stmt = (
+        select(Appointment)
+        .options(selectinload(Appointment.trainer))
+        .where(
             Appointment.client_id == client_record.id,
             Appointment.start_time >= datetime.utcnow(),
-            Appointment.status.notin_(["cancelled"])
+            Appointment.status.notin_(["cancelled"]),
         )
         .order_by(Appointment.start_time.asc())
         .limit(10)
-        .all()
     )
+    appointments = list((await db.execute(stmt)).scalars().all())
 
     return {
         "appointments": [
@@ -293,24 +313,10 @@ def get_client_appointments(
                 "duration_minutes": a.duration_minutes,
                 "location": a.location,
                 "notes": a.notes,
-                "trainer_name": f"{a.trainer.first_name} {a.trainer.last_name}" if a.trainer else None,
+                "trainer_name": (
+                    f"{a.trainer.first_name} {a.trainer.last_name}" if a.trainer else None
+                ),
             }
             for a in appointments
         ]
     }
-
-
-def get_missing_profile_fields(client_record) -> list:
-    """Get list of missing profile fields"""
-    missing = []
-    
-    if not client_record.height: missing.append("height")
-    if not client_record.weight: missing.append("weight")
-    if not client_record.activity_level: missing.append("activity_level")
-    if not client_record.primary_goal: missing.append("primary_goal")
-    if not client_record.date_of_birth: missing.append("date_of_birth")
-    if not client_record.gender: missing.append("gender")
-    if not client_record.emergency_contact_name: missing.append("emergency_contact_name")
-    if not client_record.emergency_contact_phone: missing.append("emergency_contact_phone")
-    
-    return missing

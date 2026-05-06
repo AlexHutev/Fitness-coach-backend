@@ -33,9 +33,13 @@ target_metadata = Base.metadata
 
 
 def get_database_url():
-    """Get database URL from environment or config"""
-    from app.core.config import settings
-    return settings.database_url_computed
+    """Get database URL for Alembic.
+
+    Alembic uses a sync DBAPI; psycopg3 (driver token `postgresql+psycopg`)
+    speaks both sync and async, so we can reuse the runtime URL directly.
+    """
+    from app.core.database import DATABASE_URL_SYNC
+    return DATABASE_URL_SYNC
 
 
 def run_migrations_offline() -> None:
